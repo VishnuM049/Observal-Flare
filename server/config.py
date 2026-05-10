@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_repo_owner: str = "BlazeUp-AI"
     github_repo_name: str = "Observal"
+    github_webhook_secret: str = ""
 
     # AWS
     aws_access_key_id: str = ""

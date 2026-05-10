@@ -19,6 +19,7 @@ SUBJECTS = {
     "ready_after_wipe": "Your Observal site {domain} is live (data was reset)",
     "failed": "Provisioning failed for {domain}",
     "destroyed": "Your Observal site {domain} has been destroyed",
+    "pr_closed": "PR closed — {domain} will be destroyed in 24 hours",
 }
 
 
