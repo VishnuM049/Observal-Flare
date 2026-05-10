@@ -1,0 +1,53 @@
+[project]
+name = "flare-server"
+version = "0.1.0"
+description = "Observal instance provisioning platform — API server"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
+    "sqlalchemy[asyncio]>=2.0,<3",
+    "asyncpg>=0.30,<1",
+    "alembic>=1.14,<2",
+    "arq>=0.26,<1",
+    "redis>=5.2,<6",
+    "httpx>=0.28,<1",
+    "boto3>=1.35,<2",
+    "authlib>=1.4,<2",
+    "itsdangerous>=2.2,<3",
+    "python-multipart>=0.0.12",
+    "jinja2>=3.1,<4",
+    "passlib>=1.7,<2",
+    "email-validator>=2.1,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8,<9",
+    "pytest-asyncio>=0.24,<1",
+    "pytest-httpx>=0.34,<1",
+    "ruff>=0.8,<1",
+    "mypy>=1.13,<2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]

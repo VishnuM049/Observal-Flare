@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+
+from arq import create_pool
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from server.api import auth, deploy_sources, health, invites, sites, webhooks
+from server.api.sites import set_arq_pool
+from server.config import get_settings
+from server.worker.settings import get_redis_settings
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s [%(name)s] %(message)s")
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    settings = get_settings()
+    logger.info("Starting Flare (env=%s)", settings.flare_env.value)
+
+    pool = await create_pool(get_redis_settings())
+    set_arq_pool(pool)
+    logger.info("ARQ pool connected")
+
+    yield
+
+    await pool.aclose()
+    logger.info("Flare shutdown complete")
+
+
+def create_app() -> FastAPI:
+    settings = get_settings()
+
+    app = FastAPI(
+        title="Flare",
+        description="Observal instance provisioning platform",
+        version="0.1.0",
+        lifespan=lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", settings.flare_base_url],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(auth.router)
+    app.include_router(sites.router)
+    app.include_router(invites.router)
+    app.include_router(health.router)
+    app.include_router(deploy_sources.router)
+    app.include_router(webhooks.router)
+
+    return app
+
+
+app = create_app()

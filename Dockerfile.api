@@ -1,0 +1,16 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY server/pyproject.toml /tmp/pyproject.toml
+RUN python3 -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/pyproject.toml','rb'))['project']['dependencies']))" > /tmp/reqs.txt \
+    && pip install --no-cache-dir -r /tmp/reqs.txt
+
+ENV PYTHONPATH=/app
+
+COPY server/ server/
+COPY scripts/api-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["uvicorn", "server.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

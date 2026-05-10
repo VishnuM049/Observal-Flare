@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <h2 style="color: #f59e0b;">Site redeployed (data was reset)</h2>
+  <p>Your site <strong>{{ site.name }}</strong> was redeployed, but the update failed with existing data. Flare automatically wiped the database volumes and restarted fresh.</p>
+  <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+    <tr><td style="padding: 8px; color: #666;">URL</td><td style="padding: 8px;"><a href="https://{{ site.domain }}">https://{{ site.domain }}</a></td></tr>
+    <tr><td style="padding: 8px; color: #666;">Commit</td><td style="padding: 8px; font-family: monospace;">{{ site.resolved_sha[:8] if site.resolved_sha else 'N/A' }}</td></tr>
+  </table>
+  <a href="{{ flare_url }}/sites/{{ site.id }}" style="display: inline-block; background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">View in Flare</a>
+</body>
+</html>

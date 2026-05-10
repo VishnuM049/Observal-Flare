@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <h2 style="color: #dc2626;">Provisioning failed</h2>
+  <table style="width: 100%; border-collapse: collapse; margin: 16px 0;">
+    <tr><td style="padding: 8px; color: #666;">Site</td><td style="padding: 8px; font-weight: bold;">{{ site.name }}</td></tr>
+    <tr><td style="padding: 8px; color: #666;">Deploy</td><td style="padding: 8px;">{{ site.deploy_type.value }} / {{ site.deploy_ref }}</td></tr>
+    <tr><td style="padding: 8px; color: #666;">Error</td><td style="padding: 8px; color: #dc2626;">{{ site.error_message or 'Unknown error' }}</td></tr>
+  </table>
+  <a href="{{ flare_url }}/sites/{{ site.id }}" style="display: inline-block; background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 6px;">View details in Flare</a>
+</body>
+</html>
