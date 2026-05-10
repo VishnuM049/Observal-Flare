@@ -35,6 +35,13 @@ resource "aws_instance" "site" {
   vpc_security_group_ids = [aws_security_group.site.id]
   iam_instance_profile   = aws_iam_instance_profile.site.name
 
+  user_data = <<-EOF
+    #!/bin/bash
+    snap install amazon-ssm-agent --classic
+    systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
+    systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
+  EOF
+
   root_block_device {
     volume_size = 50
     volume_type = "gp3"

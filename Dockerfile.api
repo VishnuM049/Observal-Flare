@@ -2,6 +2,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# Install Terraform
+RUN apt-get update && apt-get install -y --no-install-recommends gnupg software-properties-common curl unzip \
+    && curl -fsSL https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_$(dpkg --print-architecture).zip -o /tmp/terraform.zip \
+    && unzip /tmp/terraform.zip -d /usr/local/bin/ \
+    && rm /tmp/terraform.zip \
+    && apt-get purge -y gnupg software-properties-common unzip \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 COPY server/pyproject.toml /tmp/pyproject.toml
 RUN python3 -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/pyproject.toml','rb'))['project']['dependencies']))" > /tmp/reqs.txt \
     && pip install --no-cache-dir -r /tmp/reqs.txt
@@ -9,6 +19,7 @@ RUN python3 -c "import tomllib; print('\n'.join(tomllib.load(open('/tmp/pyprojec
 ENV PYTHONPATH=/app
 
 COPY server/ server/
+COPY infra/ infra/
 COPY scripts/api-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

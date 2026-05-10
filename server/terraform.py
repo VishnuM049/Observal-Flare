@@ -3,9 +3,14 @@ from __future__ import annotations
 import abc
 import asyncio
 import json
+import shutil
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 
 from server.config import get_settings
+
+TF_MODULE_DIR = Path("/app/infra/site")
 
 
 @dataclass
@@ -45,6 +50,12 @@ class RealTerraform(TerraformRunner):
             f"-backend-config=dynamodb_table={self._lock_table}",
         ]
 
+    def _make_workdir(self) -> str:
+        """Copy the Terraform module to a temp dir so concurrent operations don't conflict."""
+        workdir = tempfile.mkdtemp(prefix="flare-tf-")
+        shutil.copytree(TF_MODULE_DIR, workdir, dirs_exist_ok=True)
+        return workdir
+
     async def _run(self, args: list[str], cwd: str) -> str:
         proc = await asyncio.create_subprocess_exec(
             "terraform", *args,
@@ -58,28 +69,37 @@ class RealTerraform(TerraformRunner):
         return stdout.decode()
 
     async def apply(self, site_name: str, instance_size: str) -> TerraformResult:
-        tf_dir = "infra/site"
-        await self._run(["init", *self._backend_config(site_name)], cwd=tf_dir)
-        await self._run([
-            "apply", "-auto-approve",
-            f"-var=site_name={site_name}",
-            f"-var=instance_size={instance_size}",
-            f"-var=route53_zone_id={self._zone_id}",
-            f"-var=base_domain={self._base_domain}",
-        ], cwd=tf_dir)
-        output_raw = await self._run(["output", "-json"], cwd=tf_dir)
-        outputs = json.loads(output_raw)
-        return TerraformResult(
-            instance_id=outputs["instance_id"]["value"],
-            ip_address=outputs["public_ip"]["value"],
-        )
+        workdir = self._make_workdir()
+        try:
+            await self._run(["init", *self._backend_config(site_name)], cwd=workdir)
+            await self._run([
+                "apply", "-auto-approve",
+                f"-var=site_name={site_name}",
+                f"-var=instance_size={instance_size}",
+                f"-var=route53_zone_id={self._zone_id}",
+                f"-var=base_domain={self._base_domain}",
+            ], cwd=workdir)
+            output_raw = await self._run(["output", "-json"], cwd=workdir)
+            outputs = json.loads(output_raw)
+            return TerraformResult(
+                instance_id=outputs["instance_id"]["value"],
+                ip_address=outputs["public_ip"]["value"],
+            )
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
 
     async def destroy(self, site_name: str) -> None:
-        tf_dir = "infra/site"
-        await self._run(["init", *self._backend_config(site_name)], cwd=tf_dir)
-        await self._run(["destroy", "-auto-approve"], cwd=tf_dir)
+        workdir = self._make_workdir()
+        try:
+            await self._run(["init", *self._backend_config(site_name)], cwd=workdir)
+            await self._run(["destroy", "-auto-approve"], cwd=workdir)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
 
     async def force_unlock(self, site_name: str, lock_id: str) -> None:
-        tf_dir = "infra/site"
-        await self._run(["init", *self._backend_config(site_name)], cwd=tf_dir)
-        await self._run(["force-unlock", "-force", lock_id], cwd=tf_dir)
+        workdir = self._make_workdir()
+        try:
+            await self._run(["init", *self._backend_config(site_name)], cwd=workdir)
+            await self._run(["force-unlock", "-force", lock_id], cwd=workdir)
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
