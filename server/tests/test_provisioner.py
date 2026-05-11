@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.mock import MockGitHubClient, MockSSM, MockTerraform
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
 from server.models.user import User, UserRole
-from server.provisioner import destroy_site, provision_site, redeploy_site
+from server.provisioner import _idle_cron_block, destroy_site, provision_site, redeploy_site
 from server.ssm import CommandResult
 
 
@@ -151,3 +151,31 @@ async def test_redeploy_no_wipe_when_disabled(db: AsyncSession, admin_user: User
     await db.refresh(site)
     assert site.status == SiteStatus.FAILED
     assert site.error_message is not None
+
+
+def test_idle_cron_block_injected_for_idle_sites(admin_user: User):
+    site = Site(
+        id=uuid.uuid4(), name="idle-test", domain="idle-test.observal.io",
+        deploy_type=DeployType.BRANCH, deploy_ref="main", requestor_email="t@example.com",
+        created_by=admin_user.id, instance_size="t3.large", sleep_mode=SleepMode.IDLE,
+    )
+    block = _idle_cron_block(site)
+    assert "idle-check.sh" in block
+    assert f"/api/sites/{site.id}/idle" in block
+    assert "*/30" in block
+
+
+def test_idle_cron_block_empty_for_non_idle_sites(admin_user: User):
+    site = Site(
+        id=uuid.uuid4(), name="nightly-test", domain="nightly-test.observal.io",
+        deploy_type=DeployType.RELEASE, deploy_ref="v1", requestor_email="t@example.com",
+        created_by=admin_user.id, instance_size="t3.large", sleep_mode=SleepMode.NIGHTLY,
+    )
+    assert _idle_cron_block(site) == ""
+
+    site_none = Site(
+        id=uuid.uuid4(), name="none-test", domain="none-test.observal.io",
+        deploy_type=DeployType.RELEASE, deploy_ref="v1", requestor_email="t@example.com",
+        created_by=admin_user.id, instance_size="t3.large", sleep_mode=SleepMode.NONE,
+    )
+    assert _idle_cron_block(site_none) == ""

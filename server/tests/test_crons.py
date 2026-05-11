@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
 from server.models.user import User, UserRole
-from server.worker.tasks import cron_destroy_expired, cron_nightly_sleep, cron_stale_reminders
+from server.worker.tasks import cron_destroy_expired, cron_nightly_sleep, cron_stale_reminders, task_sleep_site
 
 
 def _patch_session(db: AsyncSession):
@@ -123,3 +123,49 @@ async def test_stale_reminders(db: AsyncSession):
 
     assert stale.reminder_sent_at is not None
     assert fresh.reminder_sent_at is None
+
+
+async def test_sleep_site_transitions_to_sleeping(db: AsyncSession):
+    """task_sleep_site should set status to SLEEPING, not STOPPED."""
+    user = User(email=f"cron-{uuid.uuid4().hex[:6]}@test.local", name="Cron Test", role=UserRole.ADMIN)
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    site = Site(
+        name=f"idle-{uuid.uuid4().hex[:6]}", domain="idle.test", deploy_type=DeployType.BRANCH,
+        deploy_ref="main", requestor_email="t@example.com", created_by=user.id, instance_size="t3.large",
+        status=SiteStatus.RUNNING, sleep_mode=SleepMode.IDLE, instance_id="i-mock-idle",
+    )
+    db.add(site)
+    await db.commit()
+    await db.refresh(site)
+
+    with _patch_session(db):
+        await task_sleep_site({}, str(site.id))
+
+    await db.refresh(site)
+    assert site.status == SiteStatus.SLEEPING
+
+
+async def test_sleep_site_skips_non_running(db: AsyncSession):
+    """task_sleep_site should not touch sites that aren't running."""
+    user = User(email=f"cron-{uuid.uuid4().hex[:6]}@test.local", name="Cron Test", role=UserRole.ADMIN)
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    site = Site(
+        name=f"stopped-{uuid.uuid4().hex[:6]}", domain="stopped.test", deploy_type=DeployType.BRANCH,
+        deploy_ref="main", requestor_email="t@example.com", created_by=user.id, instance_size="t3.large",
+        status=SiteStatus.STOPPED, sleep_mode=SleepMode.IDLE, instance_id="i-mock-stopped",
+    )
+    db.add(site)
+    await db.commit()
+    await db.refresh(site)
+
+    with _patch_session(db):
+        await task_sleep_site({}, str(site.id))
+
+    await db.refresh(site)
+    assert site.status == SiteStatus.STOPPED

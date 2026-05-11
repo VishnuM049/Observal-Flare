@@ -199,13 +199,14 @@ async def destroy(site_id: uuid.UUID, db: DB, user: CurrentUser):
 
 @router.post("/{site_id}/idle", status_code=204)
 async def report_idle(site_id: uuid.UUID, db: DB):
+    """Called by the instance itself when it detects no traffic for 2 hours."""
     site = await db.get(Site, site_id)
     if site is None:
         raise HTTPException(status_code=404)
     if site.status != SiteStatus.RUNNING or site.sleep_mode != SleepMode.IDLE:
         return
     pool = _get_pool()
-    await pool.enqueue_job("stop_site", str(site.id))
+    await pool.enqueue_job("sleep_site", str(site.id))
 
 
 @router.post("/{site_id}/unlock", status_code=204)

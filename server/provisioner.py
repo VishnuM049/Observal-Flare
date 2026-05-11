@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import get_settings
 from server.mock import MockGitHubClient, MockSSM, MockTerraform
-from server.models.site import Site, SiteStatus
+from server.models.site import Site, SiteStatus, SleepMode
 from server.notifications.email import send_site_notification
 from server.services.github_service import GitHubClient, RealGitHubClient
 from server.services.site_service import transition_status
@@ -49,6 +49,31 @@ def _generate_env(site: Site) -> str:
     }
     base_vars.update(site.env_overrides or {})
     return "\n".join(f"{k}={v}" for k, v in base_vars.items())
+
+
+def _idle_cron_block(site: Site) -> str:
+    """Return shell commands that install an idle-detection cron on the instance."""
+    if site.sleep_mode != SleepMode.IDLE:
+        return ""
+    settings = get_settings()
+    callback_url = f"{settings.flare_base_url}/api/sites/{site.id}/idle"
+    return f"""
+# Idle detection: check nginx access log every 30 min, sleep after 2h idle
+cat > /opt/observal/idle-check.sh << 'IDLEOF'
+#!/bin/bash
+LOG="/var/log/nginx/access.log"
+THRESHOLD=7200  # 2 hours in seconds
+if [ ! -f "$LOG" ]; then exit 0; fi
+LAST_MOD=$(stat -c %Y "$LOG" 2>/dev/null || stat -f %m "$LOG" 2>/dev/null)
+NOW=$(date +%s)
+AGE=$(( NOW - LAST_MOD ))
+if [ "$AGE" -ge "$THRESHOLD" ]; then
+    curl -sf -X POST {callback_url} || true
+fi
+IDLEOF
+chmod +x /opt/observal/idle-check.sh
+(crontab -l 2>/dev/null | grep -v idle-check; echo "*/30 * * * * /opt/observal/idle-check.sh") | crontab -
+"""
 
 
 def _deploy_script(site: Site, sha: str) -> str:
@@ -98,6 +123,7 @@ fi
 cd /opt/observal
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
 
+{_idle_cron_block(site)}
 echo "=== Deploy complete ==="
 """
 

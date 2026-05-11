@@ -84,6 +84,23 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
         logger.info("Site %s started", site.name)
 
 
+async def task_sleep_site(ctx: dict, site_id: str) -> None:
+    """Stop containers and mark site as sleeping (used by idle detection)."""
+    remote = _get_remote()
+    async with async_session() as db:
+        site = await db.get(Site, uuid.UUID(site_id))
+        if site is None:
+            return
+        if site.status != SiteStatus.RUNNING:
+            return
+        transition_status(site, SiteStatus.SLEEPING)
+        await db.commit()
+
+        await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
+        await db.commit()
+        logger.info("Idle sleep: site %s now sleeping", site.name)
+
+
 async def cron_nightly_sleep(ctx: dict) -> None:
     """Stop containers on sleep_mode=nightly sites. Runs at 7 PM daily."""
     async with async_session() as db:
@@ -158,6 +175,7 @@ class WorkerSettings:
         func(task_redeploy_site, name="redeploy_site"),
         func(task_stop_site, name="stop_site"),
         func(task_start_site, name="start_site"),
+        func(task_sleep_site, name="sleep_site"),
     ]
     cron_jobs = [
         cron(cron_nightly_sleep, hour=19, minute=0),
