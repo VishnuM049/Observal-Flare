@@ -63,17 +63,24 @@ async def task_stop_site(ctx: dict, site_id: str) -> None:
         site = await db.get(Site, uuid.UUID(site_id))
         if site is None:
             return
-        transition_status(site, SiteStatus.STOPPING)
-        await db.commit()
-        await publish_site_event(site_id, "status_change", status="stopping", message="Stopping site...")
+        try:
+            transition_status(site, SiteStatus.STOPPING)
+            await db.commit()
+            await publish_site_event(site_id, "status_change", status="stopping", message="Stopping site...")
 
-        await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
 
-        site.status = SiteStatus.STOPPED
-        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.stopped", details={"name": site.name}))
-        await db.commit()
-        await publish_site_event(site_id, "status_change", status="stopped", message="Site stopped")
-        logger.info("Site %s stopped", site.name)
+            site.status = SiteStatus.STOPPED
+            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.stopped", details={"name": site.name}))
+            await db.commit()
+            await publish_site_event(site_id, "status_change", status="stopped", message="Site stopped")
+            logger.info("Site %s stopped", site.name)
+        except Exception as e:
+            logger.exception("Stop failed for site %s", site_id)
+            site.status = SiteStatus.FAILED
+            site.error_message = str(e)[:2000]
+            await db.commit()
+            await publish_site_event(site_id, "error", status="failed", message=str(e)[:200])
 
 
 async def task_start_site(ctx: dict, site_id: str) -> None:
@@ -82,13 +89,19 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
         site = await db.get(Site, uuid.UUID(site_id))
         if site is None:
             return
-
-        await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
-        site.status = SiteStatus.RUNNING
-        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details={"name": site.name}))
-        await db.commit()
-        await publish_site_event(site_id, "status_change", status="running", message="Site started")
-        logger.info("Site %s started", site.name)
+        try:
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
+            site.status = SiteStatus.RUNNING
+            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details={"name": site.name}))
+            await db.commit()
+            await publish_site_event(site_id, "status_change", status="running", message="Site started")
+            logger.info("Site %s started", site.name)
+        except Exception as e:
+            logger.exception("Start failed for site %s", site_id)
+            site.status = SiteStatus.FAILED
+            site.error_message = str(e)[:2000]
+            await db.commit()
+            await publish_site_event(site_id, "error", status="failed", message=str(e)[:200])
 
 
 async def task_sleep_site(ctx: dict, site_id: str) -> None:
@@ -100,13 +113,20 @@ async def task_sleep_site(ctx: dict, site_id: str) -> None:
             return
         if site.status != SiteStatus.RUNNING:
             return
-        transition_status(site, SiteStatus.SLEEPING)
-        await db.commit()
-        await publish_site_event(site_id, "status_change", status="sleeping", message="Site going to sleep")
+        try:
+            transition_status(site, SiteStatus.SLEEPING)
+            await db.commit()
+            await publish_site_event(site_id, "status_change", status="sleeping", message="Site going to sleep")
 
-        await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
-        await db.commit()
-        logger.info("Idle sleep: site %s now sleeping", site.name)
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
+            await db.commit()
+            logger.info("Idle sleep: site %s now sleeping", site.name)
+        except Exception as e:
+            logger.exception("Sleep failed for site %s", site_id)
+            site.status = SiteStatus.FAILED
+            site.error_message = str(e)[:2000]
+            await db.commit()
+            await publish_site_event(site_id, "error", status="failed", message=str(e)[:200])
 
 
 async def cron_nightly_sleep(ctx: dict) -> None:

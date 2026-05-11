@@ -13,7 +13,10 @@ from server.models.site import DeployType, Site, SiteStatus, SleepMode
 from server.models.user import User
 
 SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+DEPLOY_REF_RE = re.compile(r"^[a-zA-Z0-9._/\-]+$")
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+VALID_INSTANCE_SIZES = frozenset({"t3.medium", "t3.large", "t3.xlarge"})
 
 RESERVED_ENV_KEYS = frozenset({
     "DATABASE_URL",
@@ -49,6 +52,18 @@ def validate_site_name(name: str) -> None:
         raise SiteError("Site name must be lowercase alphanumeric with hyphens, 1-63 chars")
 
 
+def validate_deploy_ref(deploy_ref: str) -> None:
+    if not deploy_ref or len(deploy_ref) > 255:
+        raise SiteError("Deploy ref must be 1-255 characters")
+    if not DEPLOY_REF_RE.match(deploy_ref):
+        raise SiteError("Deploy ref contains invalid characters — only alphanumeric, dots, slashes, hyphens, underscores allowed")
+
+
+def validate_instance_size(instance_size: str) -> None:
+    if instance_size not in VALID_INSTANCE_SIZES:
+        raise SiteError(f"Invalid instance size: '{instance_size}' — allowed: {', '.join(sorted(VALID_INSTANCE_SIZES))}")
+
+
 def validate_env_overrides(overrides: dict[str, str]) -> None:
     for key, value in overrides.items():
         if not ENV_KEY_RE.match(key):
@@ -75,6 +90,8 @@ async def create_site(
     ttl_days: int | None = None,
 ) -> Site:
     validate_site_name(name)
+    validate_deploy_ref(deploy_ref)
+    validate_instance_size(instance_size)
     if env_overrides:
         validate_env_overrides(env_overrides)
     settings = get_settings()

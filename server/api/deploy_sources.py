@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Query
 
+from server.api.deps import CurrentUser
 from server.config import get_settings
 from server.mock import MockGitHubClient
 from server.services.github_service import RealGitHubClient
@@ -8,7 +9,7 @@ router = APIRouter(prefix="/api/deploy-sources", tags=["deploy-sources"])
 
 
 @router.get("/validate")
-async def validate_deploy_source(type: str = Query(...), ref: str = Query(...)):
+async def validate_deploy_source(user: CurrentUser, type: str = Query(...), ref: str = Query(...)):
     settings = get_settings()
     github = MockGitHubClient() if settings.use_mock_github else RealGitHubClient()
 

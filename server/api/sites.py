@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 from arq import ArqRedis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 
 from server.api.deps import DB, AdminUser, CurrentUser
@@ -213,8 +213,12 @@ async def destroy(site_id: uuid.UUID, db: DB, user: CurrentUser):
 
 
 @router.post("/{site_id}/idle", status_code=204)
-async def report_idle(site_id: uuid.UUID, db: DB):
+async def report_idle(site_id: uuid.UUID, db: DB, authorization: str | None = Header(None)):
     """Called by the instance itself when it detects no traffic for 2 hours."""
+    from server.config import get_settings
+    expected = f"Bearer {get_settings().secret_key}"
+    if authorization != expected:
+        raise HTTPException(status_code=401, detail="Invalid idle token")
     site = await db.get(Site, site_id)
     if site is None:
         raise HTTPException(status_code=404)

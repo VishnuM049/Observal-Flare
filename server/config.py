@@ -75,4 +75,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    if not settings.is_local and settings.secret_key == "change-me-in-production":
+        raise RuntimeError("FATAL: secret_key must be changed from the default in production")
+    return settings

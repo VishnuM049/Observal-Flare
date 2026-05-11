@@ -41,9 +41,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    origins = [settings.flare_base_url]
+    if settings.is_local:
+        origins.append("http://localhost:3000")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", settings.flare_base_url],
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

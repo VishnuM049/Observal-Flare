@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -38,9 +38,12 @@ class SleepMode(str, enum.Enum):
 
 class Site(Base):
     __tablename__ = "sites"
+    __table_args__ = (
+        Index("ix_sites_name_active", "name", unique=True, postgresql_where=text("status != 'destroyed'")),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    name: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(63), nullable=False)
     domain: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[SiteStatus] = mapped_column(Enum(SiteStatus, values_callable=lambda e: [x.value for x in e]), nullable=False, default=SiteStatus.PENDING)
     requestor_email: Mapped[str] = mapped_column(String(320), nullable=False)

@@ -290,7 +290,11 @@ export default function SiteDetailPage() {
             </button>
           )}
           <button
-            onClick={() => doAction("destroy")}
+            onClick={() => {
+              if (window.confirm(`Destroy ${site.name}? This will tear down all infrastructure and is irreversible.`)) {
+                doAction("destroy");
+              }
+            }}
             disabled={actionLoading !== null}
             className="px-4 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
           >

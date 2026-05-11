@@ -87,7 +87,8 @@ async def github_login(body: GitHubLoginRequest, response: Response, db: DB):
     await db.commit()
 
     token = create_session_token(user.id)
-    response.set_cookie("session_token", token, httponly=True, samesite="lax", max_age=86400 * 7)
+    secure = not settings.is_local
+    response.set_cookie("session_token", token, httponly=True, secure=secure, samesite="lax", max_age=86400 * 7)
     return UserResponse.model_validate(user)
 
 
@@ -109,7 +110,7 @@ async def dev_login(response: Response, db: DB):
     await db.commit()
 
     token = create_session_token(user.id)
-    response.set_cookie("session_token", token, httponly=True, samesite="lax", max_age=86400 * 7)
+    response.set_cookie("session_token", token, httponly=True, secure=False, samesite="lax", max_age=86400 * 7)
     return UserResponse.model_validate(user)
 
 
@@ -120,5 +121,6 @@ async def get_me(user: CurrentUser):
 
 @router.post("/logout")
 async def logout(response: Response):
-    response.delete_cookie("session_token")
+    settings = get_settings()
+    response.delete_cookie("session_token", httponly=True, secure=not settings.is_local, samesite="lax")
     return {"ok": True}

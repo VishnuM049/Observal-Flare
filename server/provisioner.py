@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import shlex
 from datetime import datetime
 
 import httpx
@@ -71,7 +72,7 @@ LAST_MOD=$(stat -c %Y "$LOG" 2>/dev/null || stat -f %m "$LOG" 2>/dev/null)
 NOW=$(date +%s)
 AGE=$(( NOW - LAST_MOD ))
 if [ "$AGE" -ge "$THRESHOLD" ]; then
-    curl -sf -X POST {callback_url} || true
+    curl -sf -X POST -H "Authorization: Bearer {settings.secret_key}" {callback_url} || true
 fi
 IDLEOF
 chmod +x /opt/observal/idle-check.sh
@@ -99,11 +100,11 @@ git clone https://github.com/BlazeUp-AI/Observal.git /opt/observal
 cd /opt/observal
 
 if [[ "{site.deploy_type.value}" == "pr" ]]; then
-    git fetch origin +refs/pull/{site.deploy_ref}/head:pr-{site.deploy_ref}
-    git checkout pr-{site.deploy_ref}
+    git fetch origin +refs/pull/{shlex.quote(site.deploy_ref)}/head:pr-{shlex.quote(site.deploy_ref)}
+    git checkout pr-{shlex.quote(site.deploy_ref)}
 else
-    git fetch origin {sha}
-    git checkout {sha}
+    git fetch origin {shlex.quote(sha)}
+    git checkout {shlex.quote(sha)}
 fi
 
 # Write .env
@@ -304,8 +305,8 @@ async def redeploy_site(
 set -euo pipefail
 exec > /var/log/flare-deploy.log 2>&1
 cd /opt/observal
-git fetch origin {sha}
-git checkout {sha}
+git fetch origin {shlex.quote(sha)}
+git checkout {shlex.quote(sha)}
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
 """
         cmd_result = await remote.run_command(site.instance_id, update_script)
