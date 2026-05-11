@@ -51,9 +51,26 @@ class Settings(BaseSettings):
     # Flare public URL
     flare_base_url: str = "https://flare.observal.io"
 
+    # Mock overrides (default to None = follow FLARE_ENV)
+    mock_github: bool | None = None
+    mock_terraform: bool | None = None
+    mock_ssm: bool | None = None
+
     @property
     def is_local(self) -> bool:
         return self.flare_env == FlareEnv.LOCAL
+
+    @property
+    def use_mock_github(self) -> bool:
+        return self.mock_github if self.mock_github is not None else self.is_local
+
+    @property
+    def use_mock_terraform(self) -> bool:
+        return self.mock_terraform if self.mock_terraform is not None else self.is_local
+
+    @property
+    def use_mock_ssm(self) -> bool:
+        return self.mock_ssm if self.mock_ssm is not None else self.is_local
 
 
 @lru_cache

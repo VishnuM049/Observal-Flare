@@ -62,7 +62,7 @@ async def github_login(body: GitHubLoginRequest, response: Response, db: DB):
         )
         gh_user = user_resp.json()
 
-    github = MockGitHubClient() if settings.is_local else RealGitHubClient()
+    github = MockGitHubClient() if settings.use_mock_github else RealGitHubClient()
     is_member = await github.check_org_membership(gh_user["login"])
     if not is_member:
         raise HTTPException(status_code=403, detail=f"User is not a member of {settings.github_org}")

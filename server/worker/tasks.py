@@ -9,6 +9,7 @@ from arq import cron, func
 from sqlalchemy import select
 
 from server.database import async_session
+from server.models.audit_log import AuditLog
 from server.models.site import Site, SiteStatus, SleepMode
 from server.notifications.email import send_site_notification
 from server.provisioner import destroy_site, provision_site, redeploy_site
@@ -23,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 def _get_remote() -> SSMRunner:
-    if get_settings().is_local:
+    if get_settings().use_mock_ssm:
         return MockSSM()
     return RealSSM()
 
@@ -67,6 +68,7 @@ async def task_stop_site(ctx: dict, site_id: str) -> None:
         await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
 
         site.status = SiteStatus.STOPPED
+        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.stopped", details={"name": site.name}))
         await db.commit()
         logger.info("Site %s stopped", site.name)
 
@@ -80,6 +82,7 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
 
         await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
         site.status = SiteStatus.RUNNING
+        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details={"name": site.name}))
         await db.commit()
         logger.info("Site %s started", site.name)
 

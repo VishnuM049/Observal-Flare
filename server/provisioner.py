@@ -17,6 +17,7 @@ from server.mock import MockGitHubClient, MockSSM, MockTerraform
 from server.models.site import Site, SiteStatus, SleepMode
 from server.notifications.email import send_site_notification
 from server.services.github_service import GitHubClient, RealGitHubClient
+from server.models.audit_log import AuditLog
 from server.services.site_service import transition_status
 from server.ssm import CommandResult, RealSSM, SSMRunner
 from server.terraform import RealTerraform, TerraformRunner
@@ -26,9 +27,10 @@ logger = logging.getLogger(__name__)
 
 def _get_defaults() -> tuple[TerraformRunner, SSMRunner, GitHubClient]:
     settings = get_settings()
-    if settings.is_local:
-        return MockTerraform(), MockSSM(), MockGitHubClient()
-    return RealTerraform(), RealSSM(), RealGitHubClient()
+    tf = MockTerraform() if settings.use_mock_terraform else RealTerraform()
+    ssm = MockSSM() if settings.use_mock_ssm else RealSSM()
+    gh = MockGitHubClient() if settings.use_mock_github else RealGitHubClient()
+    return tf, ssm, gh
 
 
 def _generate_env(site: Site) -> str:
@@ -242,6 +244,9 @@ async def destroy_site(
         site.ip_address = None
         await db.commit()
 
+        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.destroyed", details={"name": site.name}))
+        await db.commit()
+
         await send_site_notification(site, "destroyed")
         logger.info("Site %s destroyed", site.name)
 
@@ -301,6 +306,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
             transition_status(site, SiteStatus.RUNNING)
             site.last_deployed_at = datetime.utcnow()
             site.error_message = None
+            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.redeployed", details={"resolved_sha": sha}))
             await db.commit()
             await send_site_notification(site, "ready")
         elif site.auto_wipe_on_failure:

@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/deploy-sources", tags=["deploy-sources"])
 @router.get("/validate")
 async def validate_deploy_source(type: str = Query(...), ref: str = Query(...)):
     settings = get_settings()
-    github = MockGitHubClient() if settings.is_local else RealGitHubClient()
+    github = MockGitHubClient() if settings.use_mock_github else RealGitHubClient()
 
     try:
         sha = await github.resolve_ref(type, ref)

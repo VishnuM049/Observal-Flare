@@ -239,7 +239,7 @@ async def force_unlock(site_id: uuid.UUID, body: dict, db: DB, admin: AdminUser)
     from server.mock import MockTerraform
     from server.terraform import RealTerraform
 
-    tf = MockTerraform() if get_settings().is_local else RealTerraform()
+    tf = MockTerraform() if get_settings().use_mock_terraform else RealTerraform()
     await tf.force_unlock(site.name, lock_id)
 
 
@@ -257,7 +257,7 @@ async def get_site_logs(site_id: uuid.UUID, db: DB, user: CurrentUser):
     from server.mock import MockSSM
     from server.ssm import RealSSM
 
-    remote = MockSSM() if get_settings().is_local else RealSSM()
+    remote = MockSSM() if get_settings().use_mock_ssm else RealSSM()
     result = await remote.run_command(
         site.instance_id,
         "cd /opt/observal && docker compose logs --tail=200 2>&1",
