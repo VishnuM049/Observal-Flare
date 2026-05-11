@@ -83,4 +83,5 @@ export interface SiteCreateRequest {
   auto_update?: boolean;
   auto_wipe_on_failure?: boolean;
   sleep_mode?: SleepMode;
+  ttl_days?: number | null;
 }

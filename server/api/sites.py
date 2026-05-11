@@ -5,7 +5,7 @@ from datetime import datetime
 
 from arq import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from server.api.deps import DB, AdminUser, CurrentUser
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
@@ -40,6 +40,7 @@ class SiteCreateRequest(BaseModel):
     auto_update: bool = False
     auto_wipe_on_failure: bool | None = None
     sleep_mode: SleepMode | None = None
+    ttl_days: int | None = Field(default=None, ge=1, le=365)
 
 
 class SiteUpdateRequest(BaseModel):
@@ -47,6 +48,7 @@ class SiteUpdateRequest(BaseModel):
     auto_update: bool | None = None
     auto_wipe_on_failure: bool | None = None
     sleep_mode: SleepMode | None = None
+    ttl_days: int | None = Field(default=None, ge=0, le=365)
 
 
 class SiteResponse(BaseModel):
@@ -101,6 +103,7 @@ async def create_new_site(body: SiteCreateRequest, db: DB, user: CurrentUser):
             auto_update=body.auto_update,
             auto_wipe_on_failure=body.auto_wipe_on_failure,
             sleep_mode=body.sleep_mode,
+            ttl_days=body.ttl_days,
         )
     except SiteError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -138,6 +141,15 @@ async def update_site_config(site_id: uuid.UUID, body: SiteUpdateRequest, db: DB
         site.auto_wipe_on_failure = body.auto_wipe_on_failure
     if body.sleep_mode is not None:
         site.sleep_mode = body.sleep_mode
+    if body.ttl_days is not None:
+        if body.ttl_days == 0:
+            site.ttl_days = None
+            site.reminder_sent_at = None
+            site.scheduled_destroy_at = None
+        else:
+            site.ttl_days = body.ttl_days
+            site.reminder_sent_at = None
+            site.scheduled_destroy_at = None
 
     await db.commit()
     await db.refresh(site)

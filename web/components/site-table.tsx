@@ -24,6 +24,7 @@ export function SiteTable({ sites }: { sites: Site[] }) {
             <th className="text-left px-4 py-3 font-medium">Status</th>
             <th className="text-left px-4 py-3 font-medium">Deploy</th>
             <th className="text-left px-4 py-3 font-medium">Size</th>
+            <th className="text-left px-4 py-3 font-medium">Expires</th>
             <th className="text-left px-4 py-3 font-medium">Created</th>
           </tr>
         </thead>
@@ -51,6 +52,17 @@ export function SiteTable({ sites }: { sites: Site[] }) {
                 )}
               </td>
               <td className="px-4 py-3 text-gray-600">{site.instance_size}</td>
+              <td className="px-4 py-3 text-gray-500">
+                {site.scheduled_destroy_at ? (
+                  <span className="text-red-600 text-xs">
+                    {new Date(site.scheduled_destroy_at).toLocaleDateString()}
+                  </span>
+                ) : site.ttl_days ? (
+                  <span className="text-xs">{site.ttl_days}d</span>
+                ) : (
+                  <span className="text-gray-300 text-xs">--</span>
+                )}
+              </td>
               <td className="px-4 py-3 text-gray-500">
                 {new Date(site.created_at).toLocaleDateString()}
               </td>

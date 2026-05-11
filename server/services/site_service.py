@@ -72,6 +72,7 @@ async def create_site(
     auto_update: bool = False,
     auto_wipe_on_failure: bool | None = None,
     sleep_mode: SleepMode | None = None,
+    ttl_days: int | None = None,
 ) -> Site:
     validate_site_name(name)
     if env_overrides:
@@ -91,8 +92,7 @@ async def create_site(
         else:
             sleep_mode = SleepMode.NONE
 
-    ttl_days: int | None = None
-    if deploy_type in (DeployType.PR, DeployType.BRANCH):
+    if ttl_days is None and deploy_type in (DeployType.PR, DeployType.BRANCH):
         ttl_days = 1
 
     site = Site(
@@ -112,7 +112,7 @@ async def create_site(
     )
     db.add(site)
 
-    audit = AuditLog(user_id=user.id, site_id=site.id, action="site.created", details={"name": name, "deploy_type": deploy_type.value, "deploy_ref": deploy_ref})
+    audit = AuditLog(user_id=user.id, site_id=site.id, action="site.created", details={"name": name, "deploy_type": deploy_type.value, "deploy_ref": deploy_ref, "ttl_days": ttl_days})
     db.add(audit)
 
     await db.commit()

@@ -21,6 +21,7 @@ SUBJECTS = {
     "destroyed": "Your Observal site {domain} has been destroyed",
     "pr_closed": "PR closed — {domain} will be destroyed in 24 hours",
     "stale": "Do you still need {domain}?",
+    "ttl_expiring": "{domain} will be destroyed in 12 hours",
 }
 
 

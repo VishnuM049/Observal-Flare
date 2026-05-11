@@ -38,6 +38,18 @@ BILLABLE_STATUSES = {
 }
 
 
+def _projected_end_date(site: Site) -> datetime | None:
+    """Return the earliest known or inferred destruction time for a site."""
+    if site.scheduled_destroy_at is not None:
+        dt = site.scheduled_destroy_at
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+    if site.ttl_days is not None and site.reminder_sent_at is None:
+        created = site.created_at
+        created = created.replace(tzinfo=timezone.utc) if created.tzinfo is None else created
+        return created + timedelta(days=site.ttl_days, hours=12)
+    return None
+
+
 def _daily_cost(instance_size: str, sleep_mode: str) -> float:
     ec2 = EC2_MONTHLY.get(instance_size, EC2_MONTHLY["t3.large"])
     fraction = SLEEP_RUNNING_FRACTION.get(sleep_mode, 1.0)
@@ -102,10 +114,19 @@ async def get_cost_summary(
     projection: list[DayCost] = []
     for i in range(1, projection_days + 1):
         day = today + timedelta(days=i)
+        day_start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+        day_cost = 0.0
+        day_count = 0
+        for site in active_sites:
+            end = _projected_end_date(site)
+            if end is not None and end <= day_start:
+                continue
+            day_cost += _daily_cost(site.instance_size, site.sleep_mode.value)
+            day_count += 1
         projection.append(DayCost(
             date=day.isoformat(),
-            cost=round(today_daily, 2),
-            site_count=len(active_sites),
+            cost=round(day_cost, 2),
+            site_count=day_count,
         ))
 
     return CostSummary(

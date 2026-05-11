@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { DeployType, SleepMode } from "@/lib/types";
 import { sites } from "@/lib/api-client";
@@ -19,8 +19,15 @@ export function SiteForm() {
   const [autoUpdate, setAutoUpdate] = useState(false);
   const [autoWipeOnFailure, setAutoWipeOnFailure] = useState(true);
   const [sleepMode, setSleepMode] = useState<SleepMode>("none");
+  const [ttlDays, setTtlDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (deployType === "pr" || deployType === "branch") {
+      setTtlDays((prev) => prev ?? 1);
+    }
+  }, [deployType]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -37,6 +44,7 @@ export function SiteForm() {
         auto_update: autoUpdate,
         auto_wipe_on_failure: autoWipeOnFailure,
         sleep_mode: sleepMode,
+        ttl_days: ttlDays ?? undefined,
       });
       router.push(`/sites/${site.id}`);
     } catch (err: unknown) {
@@ -111,11 +119,35 @@ export function SiteForm() {
         </select>
       </div>
 
+      <div>
+        <label className="block text-sm font-medium mb-1">Time-to-Live</label>
+        <select
+          value={ttlDays ?? ""}
+          onChange={(e) => setTtlDays(e.target.value ? Number(e.target.value) : null)}
+          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+        >
+          <option value="">No limit</option>
+          <option value="1">1 day</option>
+          <option value="3">3 days</option>
+          <option value="7">7 days</option>
+          <option value="14">14 days</option>
+          <option value="30">30 days</option>
+        </select>
+        <p className="text-xs text-gray-400 mt-1">
+          After this period, you&#39;ll receive a warning and the site will be destroyed 12 hours later.
+        </p>
+      </div>
+
       <div className="bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm">
         <span className="text-gray-500">Estimated cost: </span>
         <span className="font-medium">
           {formatDailyCost(estimateDailyCost(instanceSize, sleepMode))}
         </span>
+        {ttlDays && (
+          <span className="text-gray-500 ml-2">
+            (~${(estimateDailyCost(instanceSize, sleepMode) * ttlDays).toFixed(2)} total for {ttlDays} day{ttlDays > 1 ? "s" : ""})
+          </span>
+        )}
       </div>
 
       <div className="space-y-2">

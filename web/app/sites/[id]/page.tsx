@@ -137,6 +137,16 @@ export default function SiteDetailPage() {
             <dd>{site.sleep_mode}</dd>
           </div>
           <div>
+            <dt className="text-gray-500">Time-to-Live</dt>
+            <dd>{site.ttl_days ? `${site.ttl_days} day${site.ttl_days > 1 ? "s" : ""}` : "No limit"}</dd>
+          </div>
+          {site.scheduled_destroy_at && (
+            <div>
+              <dt className="text-gray-500">Scheduled Destruction</dt>
+              <dd className="text-red-600">{new Date(site.scheduled_destroy_at).toLocaleString()}</dd>
+            </div>
+          )}
+          <div>
             <dt className="text-gray-500">Est. Cost</dt>
             <dd>{formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode))}</dd>
           </div>
@@ -160,6 +170,40 @@ export default function SiteDetailPage() {
           )}
         </dl>
       </div>
+
+      {site.scheduled_destroy_at && isActive && (
+        <div className="bg-red-50 border border-red-200 rounded-md px-4 py-3 text-sm text-red-700 flex items-center justify-between">
+          <span>
+            This site is scheduled for automatic destruction on{" "}
+            <strong>{new Date(site.scheduled_destroy_at).toLocaleString()}</strong>.
+          </span>
+          <select
+            onChange={async (e) => {
+              const val = Number(e.target.value);
+              if (!val) return;
+              setActionLoading("extend");
+              try {
+                const updated = await sitesApi.update(site.id, { ttl_days: val });
+                setSite(updated);
+              } catch (err: unknown) {
+                setError(err instanceof Error ? err.message : "Failed to extend TTL");
+              } finally {
+                setActionLoading(null);
+              }
+            }}
+            disabled={actionLoading !== null}
+            className="ml-4 border border-red-300 rounded px-2 py-1 text-sm bg-white text-red-700"
+            defaultValue=""
+          >
+            <option value="" disabled>Extend TTL...</option>
+            <option value="1">1 day</option>
+            <option value="3">3 days</option>
+            <option value="7">7 days</option>
+            <option value="14">14 days</option>
+            <option value="30">30 days</option>
+          </select>
+        </div>
+      )}
 
       {isActive && (
         <div className="flex gap-3">

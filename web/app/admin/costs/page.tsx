@@ -128,8 +128,8 @@ export default function CostsPage() {
         </div>
         <div className="bg-white border border-gray-200 rounded-lg p-4">
           <div className="text-sm text-gray-500">Next 14 days</div>
-          <div className="text-2xl font-bold">${(data.today_daily * 14).toFixed(2)}</div>
-          <div className="text-xs text-gray-400">projected at current rate</div>
+          <div className="text-2xl font-bold">${data.projection.reduce((sum, d) => sum + d.cost, 0).toFixed(2)}</div>
+          <div className="text-xs text-gray-400">projected (accounts for TTLs)</div>
         </div>
       </div>
 

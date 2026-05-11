@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from arq import cron, func
 from sqlalchemy import select
@@ -147,7 +147,7 @@ async def cron_destroy_expired(ctx: dict) -> None:
 
 
 async def cron_stale_reminders(ctx: dict) -> None:
-    """Email requestors about sites past their TTL. Runs daily."""
+    """Warn about expired TTL and schedule destruction 12h later. Runs daily."""
     async with async_session() as db:
         now = datetime.now(timezone.utc)
         result = await db.execute(
@@ -155,6 +155,7 @@ async def cron_stale_reminders(ctx: dict) -> None:
                 Site.ttl_days.isnot(None),
                 Site.status.in_([SiteStatus.RUNNING, SiteStatus.SLEEPING, SiteStatus.STOPPED]),
                 Site.reminder_sent_at.is_(None),
+                Site.scheduled_destroy_at.is_(None),
             )
         )
         sites = list(result.scalars().all())
@@ -162,10 +163,14 @@ async def cron_stale_reminders(ctx: dict) -> None:
         for site in sites:
             age_days = (now - site.created_at.replace(tzinfo=timezone.utc)).days
             if age_days >= site.ttl_days:
-                await send_site_notification(site, "stale")
                 site.reminder_sent_at = now
+                site.scheduled_destroy_at = now + timedelta(hours=12)
                 await db.commit()
-                logger.info("Stale reminder sent for site %s (age=%dd, ttl=%dd)", site.name, age_days, site.ttl_days)
+                await send_site_notification(site, "ttl_expiring")
+                logger.info(
+                    "TTL expiry: site %s scheduled for destruction in 12h (age=%dd, ttl=%dd)",
+                    site.name, age_days, site.ttl_days,
+                )
 
 
 class WorkerSettings:
