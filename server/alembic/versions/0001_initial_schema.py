@@ -1,4 +1,4 @@
-"""Initial schema — users, invites, sites, audit_logs
+"""Initial schema — users, sites, audit_logs
 
 Revision ID: 0001
 Revises:
@@ -17,24 +17,6 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # --- invites (created first because users.invite_id references it) ---
-    op.create_table(
-        "invites",
-        sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("token", sa.String(24), unique=True, nullable=False),
-        sa.Column("created_by", UUID(as_uuid=True), nullable=False),  # FK added after users table
-        sa.Column("label", sa.String(255), nullable=True),
-        sa.Column("max_sites", sa.Integer, nullable=False, server_default="1"),
-        sa.Column("allowed_instance_sizes", JSON, nullable=False, server_default='["t3.large"]'),
-        sa.Column("forced_ttl_days", sa.Integer, nullable=True, server_default="7"),
-        sa.Column("allowed_deploy_types", JSON, nullable=False, server_default='["release","tag"]'),
-        sa.Column("env_overrides_locked", sa.Boolean, nullable=False, server_default=sa.text("true")),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("max_uses", sa.Integer, nullable=True),
-        sa.Column("use_count", sa.Integer, nullable=False, server_default="0"),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
-
     # --- users ---
     op.create_table(
         "users",
@@ -43,18 +25,14 @@ def upgrade() -> None:
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column(
             "role",
-            sa.Enum("admin", "member", "guest", name="userrole"),
+            sa.Enum("admin", "member", name="userrole"),
             nullable=False,
             server_default="member",
         ),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default=sa.text("true")),
-        sa.Column("invite_id", UUID(as_uuid=True), sa.ForeignKey("invites.id"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
     )
-
-    # Now add the deferred FK from invites.created_by → users.id
-    op.create_foreign_key("fk_invites_created_by", "invites", "users", ["created_by"], ["id"])
 
     # --- sites ---
     site_status_enum = sa.Enum(
@@ -73,7 +51,6 @@ def upgrade() -> None:
         sa.Column("status", site_status_enum, nullable=False, server_default="pending"),
         sa.Column("requestor_email", sa.String(320), nullable=False),
         sa.Column("created_by", UUID(as_uuid=True), sa.ForeignKey("users.id"), nullable=False),
-        sa.Column("invite_id", UUID(as_uuid=True), sa.ForeignKey("invites.id"), nullable=True),
         # Deploy source
         sa.Column("deploy_type", deploy_type_enum, nullable=False),
         sa.Column("deploy_ref", sa.String(255), nullable=False),
@@ -129,7 +106,6 @@ def downgrade() -> None:
     op.drop_table("audit_logs")
     op.drop_table("sites")
     op.drop_table("users")
-    op.drop_table("invites")
     sa.Enum(name="sitestatus").drop(op.get_bind())
     sa.Enum(name="deploytype").drop(op.get_bind())
     sa.Enum(name="sleepmode").drop(op.get_bind())

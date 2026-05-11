@@ -14,7 +14,7 @@ export type DeployType = "branch" | "commit" | "pr" | "tag" | "release";
 
 export type SleepMode = "none" | "nightly" | "idle";
 
-export type UserRole = "admin" | "member" | "guest";
+export type UserRole = "admin" | "member";
 
 export interface User {
   id: string;
@@ -49,21 +49,6 @@ export interface Site {
   destroyed_at: string | null;
 }
 
-export interface Invite {
-  id: string;
-  token: string;
-  label: string | null;
-  max_sites: number;
-  allowed_instance_sizes: string[];
-  forced_ttl_days: number | null;
-  allowed_deploy_types: string[];
-  env_overrides_locked: boolean;
-  expires_at: string;
-  max_uses: number | null;
-  use_count: number;
-  created_at: string;
-}
-
 export interface SiteCreateRequest {
   name: string;
   deploy_type: DeployType;
@@ -74,15 +59,4 @@ export interface SiteCreateRequest {
   auto_update?: boolean;
   auto_wipe_on_failure?: boolean;
   sleep_mode?: SleepMode;
-}
-
-export interface InviteCreateRequest {
-  label?: string;
-  max_sites?: number;
-  allowed_instance_sizes?: string[];
-  forced_ttl_days?: number | null;
-  allowed_deploy_types?: string[];
-  env_overrides_locked?: boolean;
-  expires_at: string;
-  max_uses?: number | null;
 }

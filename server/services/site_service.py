@@ -9,10 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import get_settings
 from server.models.audit_log import AuditLog
-from server.models.invite import Invite
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
-from server.models.user import User, UserRole
-from server.services.invite_service import InviteError, check_guest_site_limit
+from server.models.user import User
 
 SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
@@ -60,25 +58,11 @@ async def create_site(
     if existing.scalar_one_or_none() is not None:
         raise SiteError(f"A site named '{name}' already exists")
 
-    if user.role == UserRole.GUEST:
-        await check_guest_site_limit(db, user)
-        if user.invite_id:
-            invite = await db.get(Invite, user.invite_id)
-            if invite:
-                if deploy_type.value not in invite.allowed_deploy_types:
-                    raise InviteError(f"Deploy type '{deploy_type.value}' is not allowed for your invite")
-                if instance_size not in invite.allowed_instance_sizes:
-                    raise InviteError(f"Instance size '{instance_size}' is not allowed for your invite")
-                if invite.env_overrides_locked and env_overrides:
-                    raise InviteError("Environment overrides are locked for your invite")
-
     if auto_wipe_on_failure is None:
         auto_wipe_on_failure = deploy_type in (DeployType.PR, DeployType.BRANCH)
 
     if sleep_mode is None:
-        if user.role == UserRole.GUEST:
-            sleep_mode = SleepMode.NIGHTLY
-        elif deploy_type in (DeployType.PR, DeployType.BRANCH):
+        if deploy_type in (DeployType.PR, DeployType.BRANCH):
             sleep_mode = SleepMode.IDLE
         else:
             sleep_mode = SleepMode.NONE
@@ -86,10 +70,6 @@ async def create_site(
     ttl_days: int | None = None
     if deploy_type in (DeployType.PR, DeployType.BRANCH):
         ttl_days = 1
-    if user.role == UserRole.GUEST and user.invite_id:
-        invite = await db.get(Invite, user.invite_id)
-        if invite and invite.forced_ttl_days is not None:
-            ttl_days = invite.forced_ttl_days
 
     site = Site(
         name=name,
@@ -98,7 +78,6 @@ async def create_site(
         deploy_ref=deploy_ref,
         requestor_email=requestor_email,
         created_by=user.id,
-        invite_id=user.invite_id if user.role == UserRole.GUEST else None,
         instance_size=instance_size,
         env_overrides=env_overrides or {},
         auto_update=auto_update,
@@ -119,8 +98,6 @@ async def create_site(
 
 async def list_sites(db: AsyncSession, user: User) -> list[Site]:
     stmt = select(Site).where(Site.status != SiteStatus.DESTROYED)
-    if user.role == UserRole.GUEST:
-        stmt = stmt.where(Site.created_by == user.id)
     stmt = stmt.order_by(Site.created_at.desc())
     result = await db.execute(stmt)
     return list(result.scalars().all())
@@ -129,8 +106,6 @@ async def list_sites(db: AsyncSession, user: User) -> list[Site]:
 async def get_site(db: AsyncSession, site_id: uuid.UUID, user: User) -> Site:
     site = await db.get(Site, site_id)
     if site is None:
-        raise SiteError("Site not found")
-    if user.role == UserRole.GUEST and site.created_by != user.id:
         raise SiteError("Site not found")
     return site
 

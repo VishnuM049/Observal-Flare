@@ -7,7 +7,7 @@ from arq import create_pool
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from server.api import auth, deploy_sources, health, invites, sites, webhooks
+from server.api import auth, deploy_sources, health, sites, webhooks
 from server.api.sites import set_arq_pool
 from server.config import get_settings
 from server.worker.settings import get_redis_settings
@@ -51,7 +51,6 @@ def create_app() -> FastAPI:
 
     app.include_router(auth.router)
     app.include_router(sites.router)
-    app.include_router(invites.router)
     app.include_router(health.router)
     app.include_router(deploy_sources.router)
     app.include_router(webhooks.router)

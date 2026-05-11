@@ -10,7 +10,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from server.database import Base
-from server.models.invite import Invite
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
 from server.models.user import User, UserRole
 
@@ -30,7 +29,7 @@ async def db():
 
     async with engine.begin() as conn:
         await conn.execute(text(
-            "TRUNCATE audit_logs, sites, users, invites CASCADE"
+            "TRUNCATE audit_logs, sites, users CASCADE"
         ))
 
     await engine.dispose()
@@ -39,40 +38,6 @@ async def db():
 @pytest_asyncio.fixture
 async def admin_user(db: AsyncSession) -> User:
     user = User(email=f"admin-{uuid.uuid4().hex[:6]}@test.local", name="Test Admin", role=UserRole.ADMIN)
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
-
-
-@pytest_asyncio.fixture
-async def invite(db: AsyncSession, admin_user: User) -> Invite:
-    inv = Invite(
-        token=uuid.uuid4().hex[:12],
-        created_by=admin_user.id,
-        label="Test Invite",
-        max_sites=2,
-        allowed_instance_sizes=["t3.large"],
-        forced_ttl_days=7,
-        allowed_deploy_types=["release", "tag"],
-        env_overrides_locked=True,
-        expires_at=datetime.now(timezone.utc) + timedelta(days=30),
-        max_uses=5,
-    )
-    db.add(inv)
-    await db.commit()
-    await db.refresh(inv)
-    return inv
-
-
-@pytest_asyncio.fixture
-async def guest_user(db: AsyncSession, invite: Invite) -> User:
-    user = User(
-        email=f"guest-{uuid.uuid4().hex[:6]}@test.local",
-        name="Test Guest",
-        role=UserRole.GUEST,
-        invite_id=invite.id,
-    )
     db.add(user)
     await db.commit()
     await db.refresh(user)

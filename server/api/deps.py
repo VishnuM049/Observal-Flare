@@ -51,9 +51,3 @@ async def require_admin(user: CurrentUser) -> User:
 
 
 AdminUser = Annotated[User, Depends(require_admin)]
-
-
-async def require_internal(user: CurrentUser) -> User:
-    if user.role == UserRole.GUEST:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Internal access required")
-    return user

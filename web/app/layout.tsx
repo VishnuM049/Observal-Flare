@@ -25,9 +25,6 @@ export default function RootLayout({
             <a href="/sites/new" className="hover:text-blue-600">
               New Site
             </a>
-            <a href="/admin/invites" className="hover:text-blue-600">
-              Invites
-            </a>
           </div>
         </nav>
         <main className="max-w-6xl mx-auto px-6 py-8">{children}</main>

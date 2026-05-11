@@ -4,13 +4,12 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Response, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from server.api.deps import DB, CurrentUser, create_session_token
 from server.config import get_settings
 from server.models.user import User, UserRole
 from server.services.github_service import RealGitHubClient
-from server.services.invite_service import InviteError, redeem_invite, validate_invite_token
 from server.mock import MockGitHubClient
 
 import httpx
@@ -21,11 +20,6 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 class GitHubLoginRequest(BaseModel):
     code: str
-
-
-class InviteSignupRequest(BaseModel):
-    name: str
-    email: EmailStr
 
 
 class UserResponse(BaseModel):
@@ -83,19 +77,6 @@ async def github_login(body: GitHubLoginRequest, response: Response, db: DB):
 
     token = create_session_token(user.id)
     response.set_cookie("session_token", token, httponly=True, samesite="lax", max_age=86400 * 7)
-    return UserResponse.model_validate(user)
-
-
-@router.post("/invite/{token}")
-async def redeem_invite_link(token: str, body: InviteSignupRequest, response: Response, db: DB):
-    try:
-        invite = await validate_invite_token(db, token)
-        user = await redeem_invite(db, invite, name=body.name, email=body.email)
-    except InviteError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    session_token = create_session_token(user.id)
-    response.set_cookie("session_token", session_token, httponly=True, samesite="lax", max_age=86400 * 7)
     return UserResponse.model_validate(user)
 
 

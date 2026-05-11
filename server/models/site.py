@@ -45,7 +45,6 @@ class Site(Base):
     status: Mapped[SiteStatus] = mapped_column(Enum(SiteStatus, values_callable=lambda e: [x.value for x in e]), nullable=False, default=SiteStatus.PENDING)
     requestor_email: Mapped[str] = mapped_column(String(320), nullable=False)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    invite_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("invites.id"), nullable=True)
 
     # Deploy source
     deploy_type: Mapped[DeployType] = mapped_column(Enum(DeployType, values_callable=lambda e: [x.value for x in e]), nullable=False)

@@ -1,6 +1,4 @@
 import type {
-  Invite,
-  InviteCreateRequest,
   Site,
   SiteCreateRequest,
   User,
@@ -31,11 +29,6 @@ export const auth = {
     request<User>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({ code }),
-    }),
-  redeemInvite: (token: string, name: string, email: string) =>
-    request<User>(`/api/auth/invite/${token}`, {
-      method: "POST",
-      body: JSON.stringify({ name, email }),
     }),
   devLogin: () =>
     request<User>("/api/auth/dev-login", { method: "POST" }),
@@ -72,22 +65,6 @@ export const sites = {
       method: "POST",
       body: JSON.stringify({ lock_id: lockId }),
     }),
-};
-
-// Invites
-export const invites = {
-  list: () => request<Invite[]>("/api/invites"),
-  create: (data: InviteCreateRequest) =>
-    request<Invite>("/api/invites", {
-      method: "POST",
-      body: JSON.stringify(data),
-    }),
-  revoke: (id: string) =>
-    request(`/api/invites/${id}`, { method: "DELETE" }),
-  usage: (id: string) =>
-    request<{ invite: Invite; users: Record<string, string>[]; sites: Record<string, string>[] }>(
-      `/api/invites/${id}/usage`
-    ),
 };
 
 // Deploy sources
