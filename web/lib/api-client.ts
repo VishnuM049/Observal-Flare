@@ -1,5 +1,6 @@
 import type {
   AuditLogEntry,
+  CostSummary,
   Site,
   SiteCreateRequest,
   User,
@@ -17,6 +18,10 @@ async function request<T>(
     ...options,
   });
   if (!res.ok) {
+    if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/api/auth/")) {
+      window.location.href = "/login";
+      return new Promise(() => {}) as T;
+    }
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || `Request failed: ${res.status}`);
   }
@@ -87,6 +92,12 @@ export const auditLogs = {
     const qs = query.toString();
     return request<AuditLogEntry[]>(`/api/audit-logs${qs ? `?${qs}` : ""}`);
   },
+};
+
+// Costs
+export const costs = {
+  summary: (historyDays = 30, projectionDays = 14) =>
+    request<CostSummary>(`/api/costs?history_days=${historyDays}&projection_days=${projectionDays}`),
 };
 
 // Health

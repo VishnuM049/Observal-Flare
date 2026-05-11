@@ -60,6 +60,19 @@ export interface AuditLogEntry {
   created_at: string;
 }
 
+export interface DayCost {
+  date: string;
+  cost: number;
+  site_count: number;
+}
+
+export interface CostSummary {
+  history: DayCost[];
+  projection: DayCost[];
+  today_daily: number;
+  today_site_count: number;
+}
+
 export interface SiteCreateRequest {
   name: string;
   deploy_type: DeployType;

@@ -16,7 +16,7 @@ const SLEEP_RUNNING_FRACTION: Record<SleepMode, number> = {
   idle: 0.42,
 };
 
-export function estimateMonthlyCost(
+export function estimateDailyCost(
   instanceSize: string,
   sleepMode: SleepMode
 ): number {
@@ -24,9 +24,10 @@ export function estimateMonthlyCost(
   const fraction = SLEEP_RUNNING_FRACTION[sleepMode];
   const ec2Cost = ec2 * fraction;
   const eipCost = fraction < 1 ? EIP_STOPPED_MONTHLY * (1 - fraction) : 0;
-  return Math.round(ec2Cost + EBS_MONTHLY + DATA_TRANSFER_MONTHLY + eipCost);
+  const monthly = ec2Cost + EBS_MONTHLY + DATA_TRANSFER_MONTHLY + eipCost;
+  return Math.round((monthly / 30) * 100) / 100;
 }
 
-export function formatCost(dollars: number): string {
-  return `~$${dollars}/mo`;
+export function formatDailyCost(dollars: number): string {
+  return `~$${dollars.toFixed(2)}/day`;
 }

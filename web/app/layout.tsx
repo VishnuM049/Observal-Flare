@@ -25,6 +25,12 @@ export default function RootLayout({
             <a href="/sites/new" className="hover:text-blue-600">
               New Site
             </a>
+            <a href="/admin/costs" className="hover:text-blue-600">
+              Costs
+            </a>
+            <a href="/admin/audit" className="hover:text-blue-600">
+              Audit Log
+            </a>
           </div>
         </nav>
         <main className="max-w-6xl mx-auto px-6 py-8">{children}</main>

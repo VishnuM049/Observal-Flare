@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { DeployType, SleepMode } from "@/lib/types";
 import { sites } from "@/lib/api-client";
-import { estimateMonthlyCost, formatCost } from "@/lib/cost-estimate";
+import { estimateDailyCost, formatDailyCost } from "@/lib/cost-estimate";
 import { DeploySourcePicker } from "./deploy-source-picker";
 import { EnvEditor } from "./env-editor";
 
@@ -114,7 +114,7 @@ export function SiteForm() {
       <div className="bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm">
         <span className="text-gray-500">Estimated cost: </span>
         <span className="font-medium">
-          {formatCost(estimateMonthlyCost(instanceSize, sleepMode))}
+          {formatDailyCost(estimateDailyCost(instanceSize, sleepMode))}
         </span>
       </div>
 
