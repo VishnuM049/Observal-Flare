@@ -72,7 +72,7 @@ LAST_MOD=$(stat -c %Y "$LOG" 2>/dev/null || stat -f %m "$LOG" 2>/dev/null)
 NOW=$(date +%s)
 AGE=$(( NOW - LAST_MOD ))
 if [ "$AGE" -ge "$THRESHOLD" ]; then
-    curl -sf -X POST -H "Authorization: Bearer {settings.secret_key}" {callback_url} || true
+    curl -sf -X POST -H "Authorization: Bearer {site.idle_token}" {callback_url} || true
 fi
 IDLEOF
 chmod +x /opt/observal/idle-check.sh

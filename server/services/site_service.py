@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import secrets
 import uuid
 from datetime import datetime, timezone
 
@@ -126,6 +127,7 @@ async def create_site(
         sleep_mode=sleep_mode,
         ttl_days=ttl_days,
         terraform_state_key=f"sites/{name}/terraform.tfstate",
+        idle_token=secrets.token_urlsafe(32),
     )
     db.add(site)
 

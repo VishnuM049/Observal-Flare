@@ -222,13 +222,11 @@ async def destroy(site_id: uuid.UUID, db: DB, user: CurrentUser):
 @router.post("/{site_id}/idle", status_code=204)
 async def report_idle(site_id: uuid.UUID, db: DB, authorization: str | None = Header(None)):
     """Called by the instance itself when it detects no traffic for 2 hours."""
-    from server.config import get_settings
-    expected = f"Bearer {get_settings().secret_key}"
-    if authorization != expected:
-        raise HTTPException(status_code=401, detail="Invalid idle token")
     site = await db.get(Site, site_id)
     if site is None:
         raise HTTPException(status_code=404)
+    if not site.idle_token or authorization != f"Bearer {site.idle_token}":
+        raise HTTPException(status_code=401, detail="Invalid idle token")
     if site.status != SiteStatus.RUNNING or site.sleep_mode != SleepMode.IDLE:
         return
     pool = _get_pool()

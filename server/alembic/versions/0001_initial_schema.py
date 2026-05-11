@@ -46,7 +46,7 @@ def upgrade() -> None:
     op.create_table(
         "sites",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("name", sa.String(63), unique=True, nullable=False),
+        sa.Column("name", sa.String(63), nullable=False),
         sa.Column("domain", sa.String(255), nullable=False),
         sa.Column("status", site_status_enum, nullable=False, server_default="pending"),
         sa.Column("requestor_email", sa.String(320), nullable=False),
@@ -66,6 +66,8 @@ def upgrade() -> None:
         # Environment configuration
         sa.Column("env_overrides", JSON, nullable=False, server_default="{}"),
         sa.Column("instance_size", sa.String(20), nullable=False, server_default="t3.large"),
+        # Idle callback auth
+        sa.Column("idle_token", sa.String(64), nullable=True),
         # AWS resources
         sa.Column("instance_id", sa.String(32), nullable=True),
         sa.Column("ip_address", sa.String(45), nullable=True),
@@ -95,6 +97,7 @@ def upgrade() -> None:
     )
 
     # Indexes for common queries
+    op.create_index("ix_sites_name_active", "sites", ["name"], unique=True, postgresql_where=sa.text("status != 'destroyed'"))
     op.create_index("ix_sites_status", "sites", ["status"])
     op.create_index("ix_sites_deploy_type_ref", "sites", ["deploy_type", "deploy_ref"])
     op.create_index("ix_sites_scheduled_destroy", "sites", ["scheduled_destroy_at"], postgresql_where=sa.text("scheduled_destroy_at IS NOT NULL"))

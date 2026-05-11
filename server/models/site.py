@@ -70,6 +70,9 @@ class Site(Base):
     env_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
     instance_size: Mapped[str] = mapped_column(String(20), default="t3.large")
 
+    # Idle callback auth
+    idle_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
     # AWS resources
     instance_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
