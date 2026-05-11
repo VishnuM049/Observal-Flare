@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { Site } from "@/lib/types";
 import { sites as sitesApi } from "@/lib/api-client";
+import { estimateMonthlyCost, formatCost } from "@/lib/cost-estimate";
 import { StatusBadge } from "@/components/status-badge";
 
 export default function SiteDetailPage() {
@@ -134,6 +135,10 @@ export default function SiteDetailPage() {
           <div>
             <dt className="text-gray-500">Sleep Mode</dt>
             <dd>{site.sleep_mode}</dd>
+          </div>
+          <div>
+            <dt className="text-gray-500">Est. Cost</dt>
+            <dd>{formatCost(estimateMonthlyCost(site.instance_size, site.sleep_mode))}</dd>
           </div>
           <div>
             <dt className="text-gray-500">Created</dt>
