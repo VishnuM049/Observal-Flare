@@ -13,6 +13,7 @@ import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import get_settings
+from server.events import publish_site_event
 from server.mock import MockGitHubClient, MockSSM, MockTerraform
 from server.models.site import Site, SiteStatus, SleepMode
 from server.notifications.email import send_site_notification
@@ -169,24 +170,29 @@ async def provision_site(
         # Stage 1: Resolve deploy source
         transition_status(site, SiteStatus.PROVISIONING)
         await db.commit()
+        await publish_site_event(str(site.id), "status_change", status="provisioning", message="Resolving deploy source...")
         sha = await github.resolve_ref(site.deploy_type.value, site.deploy_ref)
         site.resolved_sha = sha
+        await publish_site_event(str(site.id), "stage_progress", message=f"Resolved SHA: {sha[:8]}")
 
         # Stage 2: Provision infrastructure
         result = await infra.apply(site_name=site.name, instance_size=site.instance_size)
         site.instance_id = result.instance_id
         site.ip_address = result.ip_address
         await db.commit()
+        await publish_site_event(str(site.id), "stage_progress", message="Infrastructure provisioned")
 
         # Stage 3: Deploy application
         transition_status(site, SiteStatus.DEPLOYING)
         await db.commit()
+        await publish_site_event(str(site.id), "status_change", status="deploying", message="Deploying application...")
         script = _deploy_script(site, sha)
         cmd_result: CommandResult = await remote.run_command(result.instance_id, script)
         if cmd_result.status != "success":
             raise RuntimeError(f"Deploy script failed: {cmd_result.output[:500]}")
 
         # Stage 4: Wait for healthy
+        await publish_site_event(str(site.id), "stage_progress", message="Waiting for health check...")
         healthy = await _wait_for_healthy(site)
         if not healthy:
             raise RuntimeError(f"Site {site.domain} did not become healthy within timeout")
@@ -196,6 +202,7 @@ async def provision_site(
         site.last_deployed_at = datetime.utcnow()
         site.error_message = None
         await db.commit()
+        await publish_site_event(str(site.id), "status_change", status="running", message="Site is live")
 
         # Stage 6: Notify
         await send_site_notification(site, "ready")
@@ -206,6 +213,7 @@ async def provision_site(
         site.status = SiteStatus.FAILED
         site.error_message = str(e)[:2000]
         await db.commit()
+        await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
         await send_site_notification(site, "failed")
         raise
 
@@ -226,6 +234,7 @@ async def destroy_site(
     try:
         transition_status(site, SiteStatus.DESTROYING)
         await db.commit()
+        await publish_site_event(str(site.id), "status_change", status="destroying", message="Destroying site...")
 
         # Stage 1: Stop application (best-effort — instance may be unreachable)
         if site.instance_id:
@@ -246,6 +255,7 @@ async def destroy_site(
 
         db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.destroyed", details={"name": site.name}))
         await db.commit()
+        await publish_site_event(str(site.id), "status_change", status="destroyed", message="Site destroyed")
 
         await send_site_notification(site, "destroyed")
         logger.info("Site %s destroyed", site.name)
@@ -255,6 +265,7 @@ async def destroy_site(
         site.status = SiteStatus.FAILED
         site.error_message = str(e)[:2000]
         await db.commit()
+        await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
         raise
 
     return site
@@ -275,6 +286,7 @@ async def redeploy_site(
     try:
         # Wake if sleeping
         if site.status == SiteStatus.SLEEPING:
+            await publish_site_event(str(site.id), "stage_progress", message="Waking from sleep...")
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
             site.status = SiteStatus.RUNNING
             await db.commit()
@@ -285,6 +297,7 @@ async def redeploy_site(
 
         transition_status(site, SiteStatus.DEPLOYING)
         await db.commit()
+        await publish_site_event(str(site.id), "status_change", status="deploying", message="Redeploying...")
 
         # Deploy updated code
         update_script = f"""#!/bin/bash
@@ -308,10 +321,12 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
             site.error_message = None
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.redeployed", details={"resolved_sha": sha}))
             await db.commit()
+            await publish_site_event(str(site.id), "status_change", status="running", message="Redeploy complete")
             await send_site_notification(site, "ready")
         elif site.auto_wipe_on_failure:
             # Wipe volumes and retry
             logger.warning("Site %s unhealthy after redeploy, wiping volumes", site.name)
+            await publish_site_event(str(site.id), "stage_progress", message="Health check failed, wiping data and retrying...")
             wipe_script = """#!/bin/bash
 set -euo pipefail
 cd /opt/observal
@@ -325,6 +340,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
                 site.last_deployed_at = datetime.utcnow()
                 site.error_message = None
                 await db.commit()
+                await publish_site_event(str(site.id), "status_change", status="running", message="Redeploy complete (data wiped)")
                 await send_site_notification(site, "ready_after_wipe")
             else:
                 raise RuntimeError("Site unhealthy after wipe and retry")
@@ -336,6 +352,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
         site.status = SiteStatus.FAILED
         site.error_message = str(e)[:2000]
         await db.commit()
+        await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
         await send_site_notification(site, "failed")
         raise
 

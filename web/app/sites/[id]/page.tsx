@@ -16,6 +16,7 @@ export default function SiteDetailPage() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [stageMessage, setStageMessage] = useState<string | null>(null);
 
   const loadSite = useCallback(() => {
     sitesApi
@@ -27,9 +28,58 @@ export default function SiteDetailPage() {
 
   useEffect(() => {
     loadSite();
-    const interval = setInterval(loadSite, 5000);
+    const interval = setInterval(loadSite, 15000);
     return () => clearInterval(interval);
   }, [loadSite]);
+
+  useEffect(() => {
+    let ws: WebSocket | null = null;
+    let delay = 1000;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+
+    function connect() {
+      if (stopped) return;
+      const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsHost = process.env.NEXT_PUBLIC_WS_URL || `${wsProtocol}//${window.location.host}`;
+      ws = new WebSocket(`${wsHost}/api/sites/ws/${id}`);
+
+      ws.onmessage = (e) => {
+        delay = 1000;
+        try {
+          const event = JSON.parse(e.data);
+          if (event.type === "status_change") {
+            setSite((prev) => prev ? { ...prev, status: event.status } : prev);
+            setStageMessage(event.message);
+            loadSite();
+          } else if (event.type === "stage_progress") {
+            setStageMessage(event.message);
+          } else if (event.type === "error") {
+            setSite((prev) => prev ? { ...prev, status: "failed", error_message: event.message } : prev);
+            setStageMessage(null);
+          }
+        } catch {
+          // ignore malformed messages
+        }
+      };
+
+      ws.onclose = () => {
+        if (stopped) return;
+        reconnectTimer = setTimeout(() => {
+          delay = Math.min(delay * 2, 30000);
+          connect();
+        }, delay);
+      };
+    }
+
+    connect();
+
+    return () => {
+      stopped = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (ws) ws.close();
+    };
+  }, [id, loadSite]);
 
   async function doAction(action: string) {
     if (!site) return;
@@ -84,9 +134,14 @@ export default function SiteDetailPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <h1 className="text-2xl font-bold">{site.name}</h1>
-        <StatusBadge status={site.status} />
+      <div>
+        <div className="flex items-center gap-4">
+          <h1 className="text-2xl font-bold">{site.name}</h1>
+          <StatusBadge status={site.status} />
+        </div>
+        {stageMessage && (
+          <p className="text-sm text-gray-500 mt-1 animate-pulse">{stageMessage}</p>
+        )}
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg p-6">
