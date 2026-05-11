@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { Site } from "@/lib/types";
+import { estimateDailyCost, formatDailyCost } from "@/lib/cost-estimate";
 import { StatusBadge } from "./status-badge";
 
 export function SiteTable({ sites }: { sites: Site[] }) {
@@ -25,6 +26,7 @@ export function SiteTable({ sites }: { sites: Site[] }) {
             <th className="text-left px-4 py-3 font-medium">Status</th>
             <th className="text-left px-4 py-3 font-medium">Deploy</th>
             <th className="text-left px-4 py-3 font-medium">Size</th>
+            <th className="text-left px-4 py-3 font-medium">Cost</th>
             <th className="text-left px-4 py-3 font-medium">Expires</th>
             <th className="text-left px-4 py-3 font-medium">Created</th>
           </tr>
@@ -53,6 +55,9 @@ export function SiteTable({ sites }: { sites: Site[] }) {
                 )}
               </td>
               <td className="px-4 py-3 text-gray-600">{site.instance_size}</td>
+              <td className="px-4 py-3 text-gray-600">
+                {formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode))}
+              </td>
               <td className="px-4 py-3 text-gray-500">
                 {site.scheduled_destroy_at ? (
                   <span className="text-red-600 text-xs">
@@ -70,6 +75,17 @@ export function SiteTable({ sites }: { sites: Site[] }) {
             </tr>
           ))}
         </tbody>
+        <tfoot className="bg-gray-50 border-t border-gray-200">
+          <tr>
+            <td className="px-4 py-3 font-medium text-gray-700" colSpan={4}>
+              Total ({sites.length} site{sites.length !== 1 ? "s" : ""})
+            </td>
+            <td className="px-4 py-3 font-medium text-gray-700">
+              {formatDailyCost(sites.reduce((sum, s) => sum + estimateDailyCost(s.instance_size, s.sleep_mode), 0))}
+            </td>
+            <td colSpan={2}></td>
+          </tr>
+        </tfoot>
       </table>
     </div>
   );
