@@ -47,10 +47,14 @@ export default function AuditLogPage() {
         >
           <option value="">All actions</option>
           <option value="site.created">site.created</option>
-          <option value="site.destroyed">site.destroyed</option>
+          <option value="site.redeploy_requested">site.redeploy_requested</option>
           <option value="site.redeployed">site.redeployed</option>
+          <option value="site.stop_requested">site.stop_requested</option>
           <option value="site.stopped">site.stopped</option>
+          <option value="site.start_requested">site.start_requested</option>
           <option value="site.started">site.started</option>
+          <option value="site.destroy_requested">site.destroy_requested</option>
+          <option value="site.destroyed">site.destroyed</option>
         </select>
       </div>
 
