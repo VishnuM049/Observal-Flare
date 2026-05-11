@@ -49,6 +49,17 @@ export interface Site {
   destroyed_at: string | null;
 }
 
+export interface AuditLogEntry {
+  id: string;
+  site_id: string | null;
+  user_id: string;
+  user_name: string | null;
+  user_email: string | null;
+  action: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface SiteCreateRequest {
   name: string;
   deploy_type: DeployType;

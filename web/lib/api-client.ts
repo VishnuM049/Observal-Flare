@@ -1,4 +1,5 @@
 import type {
+  AuditLogEntry,
   Site,
   SiteCreateRequest,
   User,
@@ -73,6 +74,19 @@ export const deploySources = {
     request<{ type: string; ref: string; resolved_sha: string; valid: boolean }>(
       `/api/deploy-sources/validate?type=${encodeURIComponent(type)}&ref=${encodeURIComponent(ref)}`
     ),
+};
+
+// Audit logs
+export const auditLogs = {
+  list: (params?: { site_id?: string; action?: string; limit?: number; offset?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.site_id) query.set("site_id", params.site_id);
+    if (params?.action) query.set("action", params.action);
+    if (params?.limit) query.set("limit", String(params.limit));
+    if (params?.offset) query.set("offset", String(params.offset));
+    const qs = query.toString();
+    return request<AuditLogEntry[]>(`/api/audit-logs${qs ? `?${qs}` : ""}`);
+  },
 };
 
 // Health
