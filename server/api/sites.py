@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr
 
 from server.api.deps import DB, AdminUser, CurrentUser
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
-from server.services.site_service import SiteError, create_site, get_site, list_sites
+from server.services.site_service import SiteError, create_site, get_site, list_sites, validate_env_overrides
 
 router = APIRouter(prefix="/api/sites", tags=["sites"])
 
@@ -127,6 +127,10 @@ async def update_site_config(site_id: uuid.UUID, body: SiteUpdateRequest, db: DB
         raise HTTPException(status_code=404, detail=str(e))
 
     if body.env_overrides is not None:
+        try:
+            validate_env_overrides(body.env_overrides)
+        except SiteError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         site.env_overrides = body.env_overrides
     if body.auto_update is not None:
         site.auto_update = body.auto_update

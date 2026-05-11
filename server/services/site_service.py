@@ -13,6 +13,18 @@ from server.models.site import DeployType, Site, SiteStatus, SleepMode
 from server.models.user import User
 
 SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
+ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+RESERVED_ENV_KEYS = frozenset({
+    "DATABASE_URL",
+    "SECRET_KEY",
+    "CLICKHOUSE_URL",
+    "REDIS_URL",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "CLICKHOUSE_USER",
+    "CLICKHOUSE_PASSWORD",
+})
 
 VALID_STATUS_TRANSITIONS: dict[SiteStatus, set[SiteStatus]] = {
     SiteStatus.PENDING: {SiteStatus.PROVISIONING, SiteStatus.FAILED},
@@ -37,6 +49,16 @@ def validate_site_name(name: str) -> None:
         raise SiteError("Site name must be lowercase alphanumeric with hyphens, 1-63 chars")
 
 
+def validate_env_overrides(overrides: dict[str, str]) -> None:
+    for key, value in overrides.items():
+        if not ENV_KEY_RE.match(key):
+            raise SiteError(f"Invalid env var key: '{key}' — must be alphanumeric/underscores, starting with a letter or underscore")
+        if key in RESERVED_ENV_KEYS:
+            raise SiteError(f"Cannot override reserved key: '{key}' — managed by Flare")
+        if "\n" in value or "\r" in value:
+            raise SiteError(f"Env var '{key}' contains newlines — not allowed")
+
+
 async def create_site(
     db: AsyncSession,
     *,
@@ -52,6 +74,8 @@ async def create_site(
     sleep_mode: SleepMode | None = None,
 ) -> Site:
     validate_site_name(name)
+    if env_overrides:
+        validate_env_overrides(env_overrides)
     settings = get_settings()
 
     existing = await db.execute(select(Site).where(Site.name == name, Site.status != SiteStatus.DESTROYED))
