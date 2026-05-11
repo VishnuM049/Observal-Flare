@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { LogoutButton } from "@/components/logout-button";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,6 +32,7 @@ export default function RootLayout({
             <a href="/admin/audit" className="hover:text-blue-600">
               Audit Log
             </a>
+            <LogoutButton />
           </div>
         </nav>
         <main className="max-w-6xl mx-auto px-6 py-8">{children}</main>

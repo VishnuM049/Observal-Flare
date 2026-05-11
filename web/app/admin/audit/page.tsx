@@ -102,8 +102,19 @@ export default function AuditLogPage() {
                       {entry.action}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-xs text-gray-500 font-mono max-w-xs truncate">
-                    {JSON.stringify(entry.details)}
+                  <td className="px-4 py-3 text-sm text-gray-600 max-w-md">
+                    {entry.details && Object.keys(entry.details).length > 0 ? (
+                      <div className="flex flex-wrap gap-x-4 gap-y-1">
+                        {Object.entries(entry.details).map(([key, value]) => (
+                          <span key={key}>
+                            <span className="text-gray-400">{key.replace(/_/g, " ")}:</span>{" "}
+                            {String(value)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-gray-300">—</span>
+                    )}
                   </td>
                 </tr>
               ))}

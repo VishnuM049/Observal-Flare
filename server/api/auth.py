@@ -3,7 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from server.api.deps import DB, CurrentUser, create_session_token
@@ -33,6 +34,13 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 
+@router.get("/callback")
+async def oauth_callback(code: str = Query(...)):
+    settings = get_settings()
+    frontend = settings.flare_base_url
+    return RedirectResponse(f"{frontend}/login?code={code}")
+
+
 @router.post("/login")
 async def github_login(body: GitHubLoginRequest, response: Response, db: DB):
     settings = get_settings()
@@ -59,13 +67,16 @@ async def github_login(body: GitHubLoginRequest, response: Response, db: DB):
     if not is_member:
         raise HTTPException(status_code=403, detail=f"User is not a member of {settings.github_org}")
 
-    result = await db.execute(select(User).where(User.email == gh_user.get("email", f"{gh_user['login']}@github.com")))
+    email = gh_user.get("email") or f"{gh_user['login']}@github.com"
+    name = gh_user.get("name") or gh_user["login"]
+
+    result = await db.execute(select(User).where(User.email == email))
     user = result.scalar_one_or_none()
 
     if user is None:
         user = User(
-            email=gh_user.get("email") or f"{gh_user['login']}@github.com",
-            name=gh_user.get("name") or gh_user["login"],
+            email=email,
+            name=name,
             role=UserRole.ADMIN,
         )
         db.add(user)
