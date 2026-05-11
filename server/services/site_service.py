@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -145,6 +145,7 @@ async def list_sites(db: AsyncSession, user: User) -> list[Site]:
 
 
 async def get_site(db: AsyncSession, site_id: uuid.UUID, user: User) -> Site:
+    # Access is team-wide by design — user param reserved for future scoping.
     site = await db.get(Site, site_id)
     if site is None:
         raise SiteError("Site not found")
@@ -152,7 +153,8 @@ async def get_site(db: AsyncSession, site_id: uuid.UUID, user: User) -> Site:
 
 
 async def get_site_for_update(db: AsyncSession, site_id: uuid.UUID, user: User) -> Site:
-    """Get a site with a row-level lock to prevent concurrent operations."""
+    """Get a site with a row-level lock to prevent concurrent operations.
+    Access is team-wide by design — user param reserved for future scoping."""
     result = await db.execute(
         select(Site).where(Site.id == site_id).with_for_update()
     )
@@ -167,7 +169,7 @@ def transition_status(site: Site, new_status: SiteStatus) -> None:
     if new_status not in allowed:
         raise SiteError(f"Cannot transition from {site.status.value} to {new_status.value}")
     site.status = new_status
-    site.updated_at = datetime.utcnow()
+    site.updated_at = datetime.now(timezone.utc)
 
 
 async def update_site_status(db: AsyncSession, site: Site, new_status: SiteStatus, **kwargs: str | None) -> Site:

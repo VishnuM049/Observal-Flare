@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Site } from "@/lib/types";
 import { sites as sitesApi } from "@/lib/api-client";
@@ -22,12 +23,12 @@ export default function SitesPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Sites</h1>
-        <a
+        <Link
           href="/sites/new"
           className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
         >
           New Site
-        </a>
+        </Link>
       </div>
       {loading && <p className="text-gray-500">Loading...</p>}
       {error && (

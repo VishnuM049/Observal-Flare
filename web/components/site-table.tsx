@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import type { Site } from "@/lib/types";
 import { StatusBadge } from "./status-badge";
 
@@ -8,9 +9,9 @@ export function SiteTable({ sites }: { sites: Site[] }) {
     return (
       <div className="text-center py-12 text-gray-500">
         No sites yet.{" "}
-        <a href="/sites/new" className="text-blue-600 hover:underline">
+        <Link href="/sites/new" className="text-blue-600 hover:underline">
           Create one
-        </a>
+        </Link>
       </div>
     );
   }
@@ -32,12 +33,12 @@ export function SiteTable({ sites }: { sites: Site[] }) {
           {sites.map((site) => (
             <tr key={site.id} className="hover:bg-gray-50">
               <td className="px-4 py-3">
-                <a
+                <Link
                   href={`/sites/${site.id}`}
                   className="font-medium text-blue-600 hover:underline"
                 >
                   {site.name}
-                </a>
+                </Link>
                 <div className="text-xs text-gray-400">{site.domain}</div>
               </td>
               <td className="px-4 py-3">

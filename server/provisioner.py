@@ -8,7 +8,7 @@ from __future__ import annotations
 import logging
 import secrets
 import shlex
-from datetime import datetime
+from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -200,7 +200,7 @@ async def provision_site(
 
         # Stage 5: Success
         transition_status(site, SiteStatus.RUNNING)
-        site.last_deployed_at = datetime.utcnow()
+        site.last_deployed_at = datetime.now(timezone.utc)
         site.error_message = None
         await db.commit()
         await publish_site_event(str(site.id), "status_change", status="running", message="Site is live")
@@ -253,7 +253,7 @@ async def destroy_site(
 
         # Stage 3: Mark destroyed
         site.status = SiteStatus.DESTROYED
-        site.destroyed_at = datetime.utcnow()
+        site.destroyed_at = datetime.now(timezone.utc)
         site.instance_id = None
         site.ip_address = None
         await db.commit()
@@ -326,7 +326,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
 
         if healthy:
             transition_status(site, SiteStatus.RUNNING)
-            site.last_deployed_at = datetime.utcnow()
+            site.last_deployed_at = datetime.now(timezone.utc)
             site.error_message = None
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.redeployed", details={"resolved_sha": sha}))
             await db.commit()
@@ -346,7 +346,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
             healthy = await _wait_for_healthy(site)
             if healthy:
                 transition_status(site, SiteStatus.RUNNING)
-                site.last_deployed_at = datetime.utcnow()
+                site.last_deployed_at = datetime.now(timezone.utc)
                 site.error_message = None
                 await db.commit()
                 await publish_site_event(str(site.id), "status_change", status="running", message="Redeploy complete (data wiped)")

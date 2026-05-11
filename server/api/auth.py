@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, Response, status
 from fastapi.responses import RedirectResponse
@@ -83,7 +83,7 @@ async def github_login(body: GitHubLoginRequest, response: Response, db: DB):
         await db.commit()
         await db.refresh(user)
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
 
     token = create_session_token(user.id)
@@ -106,7 +106,7 @@ async def dev_login(response: Response, db: DB):
         await db.commit()
         await db.refresh(user)
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
 
     token = create_session_token(user.id)

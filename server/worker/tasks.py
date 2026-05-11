@@ -189,7 +189,8 @@ async def cron_stale_reminders(ctx: dict) -> None:
         sites = list(result.scalars().all())
 
         for site in sites:
-            age_days = (now - site.created_at.replace(tzinfo=timezone.utc)).days
+            created = site.created_at if site.created_at.tzinfo else site.created_at.replace(tzinfo=timezone.utc)
+            age_days = (now - created).days
             if age_days >= site.ttl_days:
                 site.reminder_sent_at = now
                 site.scheduled_destroy_at = now + timedelta(hours=12)
