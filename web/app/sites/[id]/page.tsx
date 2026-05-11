@@ -4,7 +4,9 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { Site } from "@/lib/types";
 import { sites as sitesApi } from "@/lib/api-client";
+import type { SleepMode } from "@/lib/types";
 import { estimateDailyCost, formatDailyCost } from "@/lib/cost-estimate";
+import { EnvEditor } from "@/components/env-editor";
 import { StatusBadge } from "@/components/status-badge";
 
 export default function SiteDetailPage() {
@@ -17,6 +19,13 @@ export default function SiteDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [stageMessage, setStageMessage] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editSleepMode, setEditSleepMode] = useState<SleepMode>("none");
+  const [editAutoUpdate, setEditAutoUpdate] = useState(false);
+  const [editAutoWipe, setEditAutoWipe] = useState(false);
+  const [editTtlDays, setEditTtlDays] = useState<number | null>(null);
+  const [editRequestorEmail, setEditRequestorEmail] = useState("");
+  const [editEnvOverrides, setEditEnvOverrides] = useState<Record<string, string>>({});
 
   const loadSite = useCallback(() => {
     sitesApi
@@ -128,6 +137,38 @@ export default function SiteDetailPage() {
     }
   }
 
+  function startEditing() {
+    if (!site) return;
+    setEditSleepMode(site.sleep_mode);
+    setEditAutoUpdate(site.auto_update);
+    setEditAutoWipe(site.auto_wipe_on_failure);
+    setEditTtlDays(site.ttl_days);
+    setEditRequestorEmail(site.requestor_email);
+    setEditEnvOverrides({ ...site.env_overrides });
+    setEditing(true);
+  }
+
+  async function saveSettings() {
+    if (!site) return;
+    setActionLoading("save");
+    try {
+      const updated = await sitesApi.update(site.id, {
+        sleep_mode: editSleepMode,
+        auto_update: editAutoUpdate,
+        auto_wipe_on_failure: editAutoWipe,
+        ttl_days: editTtlDays === null ? 0 : editTtlDays,
+        requestor_email: editRequestorEmail,
+        env_overrides: editEnvOverrides,
+      });
+      setSite(updated);
+      setEditing(false);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save settings");
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   if (loading) return <p className="text-gray-500">Loading...</p>;
   if (error) return <div className="bg-red-50 text-red-700 px-4 py-2 rounded-md">{error}</div>;
   if (!site) return <p>Site not found</p>;
@@ -226,7 +267,106 @@ export default function SiteDetailPage() {
             </div>
           )}
         </dl>
+
+        {isActive && !editing && (
+          <button
+            onClick={startEditing}
+            className="mt-4 text-sm text-blue-600 hover:text-blue-800"
+          >
+            Edit Settings
+          </button>
+        )}
       </div>
+
+      {editing && (
+        <div className="bg-white border border-blue-200 rounded-lg p-6 space-y-4">
+          <h2 className="text-sm font-semibold text-gray-700">Edit Settings</h2>
+
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <label className="block text-gray-500 mb-1">Sleep Mode</label>
+              <select
+                value={editSleepMode}
+                onChange={(e) => setEditSleepMode(e.target.value as SleepMode)}
+                className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+              >
+                <option value="none">None — always running</option>
+                <option value="nightly">Nightly — stop at 7 PM daily</option>
+                <option value="idle">Idle — stop after 2h no traffic</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-gray-500 mb-1">Time-to-Live</label>
+              <select
+                value={editTtlDays ?? ""}
+                onChange={(e) => setEditTtlDays(e.target.value ? Number(e.target.value) : null)}
+                className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+              >
+                <option value="">No limit</option>
+                <option value="1">1 day</option>
+                <option value="3">3 days</option>
+                <option value="7">7 days</option>
+                <option value="14">14 days</option>
+                <option value="30">30 days</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-gray-500 mb-1">Requestor Email</label>
+              <input
+                type="email"
+                value={editRequestorEmail}
+                onChange={(e) => setEditRequestorEmail(e.target.value)}
+                className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+              />
+            </div>
+
+            <div className="space-y-2 pt-5">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={editAutoUpdate}
+                  onChange={(e) => setEditAutoUpdate(e.target.checked)}
+                />
+                Auto-update on push
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={editAutoWipe}
+                  onChange={(e) => setEditAutoWipe(e.target.checked)}
+                />
+                Auto-wipe data on failed redeploy
+              </label>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-500 mb-1 text-sm">
+              Environment Overrides
+              <span className="text-gray-400 ml-1">(takes effect on next redeploy)</span>
+            </label>
+            <EnvEditor value={editEnvOverrides} onChange={setEditEnvOverrides} />
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={saveSettings}
+              disabled={actionLoading === "save"}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50"
+            >
+              {actionLoading === "save" ? "Saving..." : "Save"}
+            </button>
+            <button
+              onClick={() => setEditing(false)}
+              className="px-4 py-2 text-sm border border-gray-300 rounded-md hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {site.scheduled_destroy_at && isActive && (
         <div className="bg-red-50 border border-red-200 rounded-md px-4 py-3 text-sm text-red-700 flex items-center justify-between">

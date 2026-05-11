@@ -49,6 +49,7 @@ class SiteUpdateRequest(BaseModel):
     auto_wipe_on_failure: bool | None = None
     sleep_mode: SleepMode | None = None
     ttl_days: int | None = Field(default=None, ge=0, le=365)
+    requestor_email: EmailStr | None = None
 
 
 class SiteResponse(BaseModel):
@@ -141,6 +142,8 @@ async def update_site_config(site_id: uuid.UUID, body: SiteUpdateRequest, db: DB
         site.auto_wipe_on_failure = body.auto_wipe_on_failure
     if body.sleep_mode is not None:
         site.sleep_mode = body.sleep_mode
+    if body.requestor_email is not None:
+        site.requestor_email = body.requestor_email
     if body.ttl_days is not None:
         if body.ttl_days == 0:
             site.ttl_days = None
