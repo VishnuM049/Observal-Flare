@@ -10,7 +10,6 @@ from sqlalchemy.orm import joinedload
 
 from server.api.deps import DB, AdminUser
 from server.models.audit_log import AuditLog
-from server.models.user import User
 
 router = APIRouter(prefix="/api/audit-logs", tags=["audit-logs"])
 
@@ -38,7 +37,7 @@ async def list_audit_logs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
-    stmt = select(AuditLog).order_by(AuditLog.created_at.desc())
+    stmt = select(AuditLog).options(joinedload(AuditLog.user)).order_by(AuditLog.created_at.desc())
 
     if site_id is not None:
         stmt = stmt.where(AuditLog.site_id == site_id)
@@ -47,20 +46,18 @@ async def list_audit_logs(
 
     stmt = stmt.offset(offset).limit(limit)
     result = await db.execute(stmt)
-    logs = list(result.scalars().all())
+    logs = list(result.unique().scalars().all())
 
-    responses = []
-    for log in logs:
-        user = await db.get(User, log.user_id)
-        responses.append(AuditLogResponse(
+    return [
+        AuditLogResponse(
             id=log.id,
             site_id=log.site_id,
             user_id=log.user_id,
-            user_name=user.name if user else None,
-            user_email=user.email if user else None,
+            user_name=log.user.name if log.user else None,
+            user_email=log.user.email if log.user else None,
             action=log.action,
             details=log.details,
             created_at=log.created_at,
-        ))
-
-    return responses
+        )
+        for log in logs
+    ]

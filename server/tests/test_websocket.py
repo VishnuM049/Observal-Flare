@@ -37,6 +37,7 @@ async def test_websocket_rejects_unauthenticated():
     """WebSocket accepts then closes with 4001 if no valid session cookie."""
     websocket = AsyncMock()
     websocket.cookies = {}
+    websocket.query_params = {}
     websocket.close = AsyncMock()
 
     await site_ws(websocket, "some-site")
