@@ -133,24 +133,26 @@ async def cron_nightly_sleep(ctx: dict) -> None:
     """Stop containers on sleep_mode=nightly sites. Runs at 7 PM daily."""
     async with async_session() as db:
         result = await db.execute(
-            select(Site).where(
+            select(Site.id).where(
                 Site.status == SiteStatus.RUNNING,
                 Site.sleep_mode == SleepMode.NIGHTLY,
             )
         )
-        sites = list(result.scalars().all())
-        if not sites:
-            return
+        site_ids = list(result.scalars().all())
 
-        remote = _get_remote()
-        for site in sites:
-            try:
+    remote = _get_remote()
+    for site_id in site_ids:
+        try:
+            async with async_session() as db:
+                site = await db.get(Site, site_id)
+                if site is None or site.status != SiteStatus.RUNNING:
+                    continue
                 await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
                 site.status = SiteStatus.SLEEPING
                 await db.commit()
                 logger.info("Nightly sleep: site %s now sleeping", site.name)
-            except Exception:
-                logger.exception("Nightly sleep failed for site %s", site.name)
+        except Exception:
+            logger.exception("Nightly sleep failed for site %s", site_id)
 
 
 async def cron_destroy_expired(ctx: dict) -> None:
@@ -158,48 +160,60 @@ async def cron_destroy_expired(ctx: dict) -> None:
     async with async_session() as db:
         now = datetime.now(timezone.utc)
         result = await db.execute(
-            select(Site).where(
+            select(Site.id).where(
                 Site.scheduled_destroy_at.isnot(None),
                 Site.scheduled_destroy_at < now,
                 Site.status.notin_([SiteStatus.DESTROYING, SiteStatus.DESTROYED]),
             )
         )
-        sites = list(result.scalars().all())
+        site_ids = list(result.scalars().all())
 
-        for site in sites:
-            logger.info("Auto-teardown: destroying expired site %s", site.name)
-            try:
+    for site_id in site_ids:
+        try:
+            async with async_session() as db:
+                site = await db.get(Site, site_id)
+                if site is None:
+                    continue
+                logger.info("Auto-teardown: destroying expired site %s", site.name)
                 await destroy_site(db, site)
-            except Exception:
-                logger.exception("Auto-teardown failed for site %s", site.name)
+        except Exception:
+            logger.exception("Auto-teardown failed for site %s", site_id)
 
 
 async def cron_stale_reminders(ctx: dict) -> None:
     """Warn about expired TTL and schedule destruction 12h later. Runs daily."""
+    now = datetime.now(timezone.utc)
     async with async_session() as db:
-        now = datetime.now(timezone.utc)
         result = await db.execute(
-            select(Site).where(
+            select(Site.id, Site.ttl_days, Site.created_at, Site.name).where(
                 Site.ttl_days.isnot(None),
                 Site.status.in_([SiteStatus.RUNNING, SiteStatus.SLEEPING, SiteStatus.STOPPED]),
                 Site.reminder_sent_at.is_(None),
                 Site.scheduled_destroy_at.is_(None),
             )
         )
-        sites = list(result.scalars().all())
+        candidates = list(result.all())
 
-        for site in sites:
-            created = site.created_at if site.created_at.tzinfo else site.created_at.replace(tzinfo=timezone.utc)
-            age_days = (now - created).days
-            if age_days >= site.ttl_days:
+    for row in candidates:
+        created = row.created_at if row.created_at.tzinfo else row.created_at.replace(tzinfo=timezone.utc)
+        age_days = (now - created).days
+        if age_days < row.ttl_days:
+            continue
+        try:
+            async with async_session() as db:
+                site = await db.get(Site, row.id)
+                if site is None:
+                    continue
                 site.reminder_sent_at = now
                 site.scheduled_destroy_at = now + timedelta(hours=12)
                 await db.commit()
                 await send_site_notification(site, "ttl_expiring")
                 logger.info(
                     "TTL expiry: site %s scheduled for destruction in 12h (age=%dd, ttl=%dd)",
-                    site.name, age_days, site.ttl_days,
+                    site.name, age_days, row.ttl_days,
                 )
+        except Exception:
+            logger.exception("Stale reminder failed for site %s", row.name)
 
 
 class WorkerSettings:
