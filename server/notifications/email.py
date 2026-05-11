@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import functools
 import logging
 from pathlib import Path
 
@@ -47,13 +49,18 @@ async def send_site_notification(site: Site, event: str) -> None:
             aws_access_key_id=settings.aws_access_key_id,
             aws_secret_access_key=settings.aws_secret_access_key,
         )
-        ses.send_email(
-            Source=settings.ses_from_address,
-            Destination={"ToAddresses": [site.requestor_email]},
-            Message={
-                "Subject": {"Data": subject, "Charset": "UTF-8"},
-                "Body": {"Html": {"Data": body_html, "Charset": "UTF-8"}},
-            },
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            functools.partial(
+                ses.send_email,
+                Source=settings.ses_from_address,
+                Destination={"ToAddresses": [site.requestor_email]},
+                Message={
+                    "Subject": {"Data": subject, "Charset": "UTF-8"},
+                    "Body": {"Html": {"Data": body_html, "Charset": "UTF-8"}},
+                },
+            ),
         )
     except Exception:
         logger.exception("Failed to send email to %s", site.requestor_email)

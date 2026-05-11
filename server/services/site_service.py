@@ -151,6 +151,17 @@ async def get_site(db: AsyncSession, site_id: uuid.UUID, user: User) -> Site:
     return site
 
 
+async def get_site_for_update(db: AsyncSession, site_id: uuid.UUID, user: User) -> Site:
+    """Get a site with a row-level lock to prevent concurrent operations."""
+    result = await db.execute(
+        select(Site).where(Site.id == site_id).with_for_update()
+    )
+    site = result.scalar_one_or_none()
+    if site is None:
+        raise SiteError("Site not found")
+    return site
+
+
 def transition_status(site: Site, new_status: SiteStatus) -> None:
     allowed = VALID_STATUS_TRANSITIONS.get(site.status, set())
     if new_status not in allowed:

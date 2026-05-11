@@ -44,14 +44,16 @@ export default function SiteDetailPage() {
       const wsHost = process.env.NEXT_PUBLIC_WS_URL || `${wsProtocol}//${window.location.host}`;
       ws = new WebSocket(`${wsHost}/api/sites/ws/${id}`);
 
-      ws.onmessage = (e) => {
+      ws.onopen = () => {
         delay = 1000;
+      };
+
+      ws.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data);
           if (event.type === "status_change") {
             setSite((prev) => prev ? { ...prev, status: event.status } : prev);
             setStageMessage(event.message);
-            loadSite();
           } else if (event.type === "stage_progress") {
             setStageMessage(event.message);
           } else if (event.type === "error") {

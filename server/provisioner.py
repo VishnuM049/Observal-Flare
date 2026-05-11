@@ -211,9 +211,13 @@ async def provision_site(
 
     except Exception as e:
         logger.exception("Provisioning failed for site %s", site.name)
-        site.status = SiteStatus.FAILED
-        site.error_message = str(e)[:2000]
-        await db.commit()
+        try:
+            site.status = SiteStatus.FAILED
+            site.error_message = str(e)[:2000]
+            await db.commit()
+        except Exception:
+            logger.exception("Failed to persist error state for site %s", site.name)
+            await db.rollback()
         await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
         await send_site_notification(site, "failed")
         raise
@@ -263,9 +267,13 @@ async def destroy_site(
 
     except Exception as e:
         logger.exception("Destroy failed for site %s", site.name)
-        site.status = SiteStatus.FAILED
-        site.error_message = str(e)[:2000]
-        await db.commit()
+        try:
+            site.status = SiteStatus.FAILED
+            site.error_message = str(e)[:2000]
+            await db.commit()
+        except Exception:
+            logger.exception("Failed to persist error state for site %s", site.name)
+            await db.rollback()
         await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
         raise
 
@@ -350,9 +358,13 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
 
     except Exception as e:
         logger.exception("Redeploy failed for site %s", site.name)
-        site.status = SiteStatus.FAILED
-        site.error_message = str(e)[:2000]
-        await db.commit()
+        try:
+            site.status = SiteStatus.FAILED
+            site.error_message = str(e)[:2000]
+            await db.commit()
+        except Exception:
+            logger.exception("Failed to persist error state for site %s", site.name)
+            await db.rollback()
         await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
         await send_site_notification(site, "failed")
         raise

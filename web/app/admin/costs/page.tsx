@@ -18,7 +18,7 @@ function CostChart({ history, projection }: { history: DayCost[]; projection: Da
   const yMax = Math.ceil(maxCost * 1.2);
 
   function x(i: number) {
-    return PAD.left + (i / (all.length - 1)) * INNER_W;
+    return PAD.left + (i / Math.max(all.length - 1, 1)) * INNER_W;
   }
   function y(cost: number) {
     return PAD.top + INNER_H - (cost / yMax) * INNER_H;

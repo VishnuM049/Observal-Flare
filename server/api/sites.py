@@ -9,7 +9,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from server.api.deps import DB, AdminUser, CurrentUser
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
-from server.services.site_service import SiteError, create_site, get_site, list_sites, validate_env_overrides
+from server.services.site_service import SiteError, create_site, get_site, get_site_for_update, list_sites, validate_env_overrides
 
 router = APIRouter(prefix="/api/sites", tags=["sites"])
 
@@ -159,7 +159,7 @@ async def update_site_config(site_id: uuid.UUID, body: SiteUpdateRequest, db: DB
 @router.post("/{site_id}/redeploy", response_model=SiteResponse)
 async def redeploy(site_id: uuid.UUID, db: DB, user: CurrentUser):
     try:
-        site = await get_site(db, site_id, user)
+        site = await get_site_for_update(db, site_id, user)
     except SiteError as e:
         raise HTTPException(status_code=404, detail=str(e))
     if site.status not in (SiteStatus.RUNNING, SiteStatus.SLEEPING, SiteStatus.FAILED):
@@ -167,13 +167,14 @@ async def redeploy(site_id: uuid.UUID, db: DB, user: CurrentUser):
 
     pool = _get_pool()
     await pool.enqueue_job("redeploy_site", str(site.id))
+    await db.commit()
     return SiteResponse.model_validate(site)
 
 
 @router.post("/{site_id}/stop", response_model=SiteResponse)
 async def stop_site(site_id: uuid.UUID, db: DB, user: CurrentUser):
     try:
-        site = await get_site(db, site_id, user)
+        site = await get_site_for_update(db, site_id, user)
     except SiteError as e:
         raise HTTPException(status_code=404, detail=str(e))
     if site.status != SiteStatus.RUNNING:
@@ -181,13 +182,14 @@ async def stop_site(site_id: uuid.UUID, db: DB, user: CurrentUser):
 
     pool = _get_pool()
     await pool.enqueue_job("stop_site", str(site.id))
+    await db.commit()
     return SiteResponse.model_validate(site)
 
 
 @router.post("/{site_id}/start", response_model=SiteResponse)
 async def start_site(site_id: uuid.UUID, db: DB, user: CurrentUser):
     try:
-        site = await get_site(db, site_id, user)
+        site = await get_site_for_update(db, site_id, user)
     except SiteError as e:
         raise HTTPException(status_code=404, detail=str(e))
     if site.status not in (SiteStatus.STOPPED, SiteStatus.SLEEPING):
@@ -195,13 +197,14 @@ async def start_site(site_id: uuid.UUID, db: DB, user: CurrentUser):
 
     pool = _get_pool()
     await pool.enqueue_job("start_site", str(site.id))
+    await db.commit()
     return SiteResponse.model_validate(site)
 
 
 @router.post("/{site_id}/destroy", response_model=SiteResponse)
 async def destroy(site_id: uuid.UUID, db: DB, user: CurrentUser):
     try:
-        site = await get_site(db, site_id, user)
+        site = await get_site_for_update(db, site_id, user)
     except SiteError as e:
         raise HTTPException(status_code=404, detail=str(e))
     if site.status in (SiteStatus.DESTROYING, SiteStatus.DESTROYED):
@@ -209,6 +212,7 @@ async def destroy(site_id: uuid.UUID, db: DB, user: CurrentUser):
 
     pool = _get_pool()
     await pool.enqueue_job("destroy_site", str(site.id))
+    await db.commit()
     return SiteResponse.model_validate(site)
 
 
