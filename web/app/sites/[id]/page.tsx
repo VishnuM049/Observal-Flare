@@ -14,6 +14,7 @@ export default function SiteDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const loadSite = useCallback(() => {
     sitesApi
@@ -50,6 +51,20 @@ export default function SiteDetailPage() {
     }
   }
 
+  function copyShareable() {
+    if (!site) return;
+    const sha = site.resolved_sha ? ` (${site.resolved_sha.slice(0, 8)})` : "";
+    const text = [
+      `${site.domain} — ${site.status}`,
+      `Deploy: ${site.deploy_type}/${site.deploy_ref}${sha}`,
+      `Instance: ${site.instance_size}`,
+    ].join("\n");
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   async function fetchLogs() {
     if (!site) return;
     try {
@@ -77,7 +92,7 @@ export default function SiteDetailPage() {
         <dl className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm">
           <div>
             <dt className="text-gray-500">Domain</dt>
-            <dd>
+            <dd className="flex items-center gap-2">
               <a
                 href={`https://${site.domain}`}
                 target="_blank"
@@ -86,6 +101,12 @@ export default function SiteDetailPage() {
               >
                 {site.domain}
               </a>
+              <button
+                onClick={copyShareable}
+                className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-1.5 py-0.5"
+              >
+                {copied ? "Copied!" : "Share"}
+              </button>
             </dd>
           </div>
           <div>
