@@ -9,7 +9,6 @@ from pydantic import BaseModel, EmailStr
 
 from server.api.deps import DB, AdminUser, CurrentUser
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
-from server.services.invite_service import InviteError
 from server.services.site_service import SiteError, create_site, get_site, list_sites
 
 router = APIRouter(prefix="/api/sites", tags=["sites"])
@@ -103,7 +102,7 @@ async def create_new_site(body: SiteCreateRequest, db: DB, user: CurrentUser):
             auto_wipe_on_failure=body.auto_wipe_on_failure,
             sleep_mode=body.sleep_mode,
         )
-    except (SiteError, InviteError) as e:
+    except SiteError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     pool = _get_pool()
