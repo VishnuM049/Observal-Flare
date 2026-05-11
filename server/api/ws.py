@@ -16,7 +16,7 @@ SESSION_MAX_AGE = 86400 * 7
 
 
 def _validate_session(websocket: WebSocket) -> bool:
-    token = websocket.cookies.get("session_token")
+    token = websocket.cookies.get("session_token") or websocket.query_params.get("token")
     if not token:
         return False
     try:
@@ -32,6 +32,7 @@ async def site_ws(websocket: WebSocket, site_id: str) -> None:
     await websocket.accept()
 
     if not _validate_session(websocket):
+        logger.warning("WebSocket auth failed for site %s (cookies: %s)", site_id, list(websocket.cookies.keys()))
         await websocket.close(code=4001)
         return
 
