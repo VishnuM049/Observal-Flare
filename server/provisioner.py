@@ -135,21 +135,25 @@ echo "=== Deploy complete ==="
 async def _wait_for_healthy(site: Site, timeout_seconds: int = 600) -> bool:
     import asyncio
 
-    url = f"https://{site.domain}/readyz"
     if get_settings().is_local:
         logger.info("[mock] Skipping health check for %s (local mode)", site.domain)
         await asyncio.sleep(2)
         return True
 
-    deadline = asyncio.get_event_loop().time() + timeout_seconds
+    urls = [f"https://{site.domain}/readyz"]
+    if site.ip_address:
+        urls.append(f"http://{site.ip_address}/readyz")
+
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
     async with httpx.AsyncClient(verify=False) as client:
-        while asyncio.get_event_loop().time() < deadline:
-            try:
-                resp = await client.get(url, timeout=5)
-                if resp.status_code == 200:
-                    return True
-            except Exception:
-                pass
+        while asyncio.get_running_loop().time() < deadline:
+            for url in urls:
+                try:
+                    resp = await client.get(url, timeout=5)
+                    if resp.status_code == 200:
+                        return True
+                except Exception:
+                    pass
             await asyncio.sleep(15)
     return False
 
