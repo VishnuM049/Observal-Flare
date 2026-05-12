@@ -43,12 +43,11 @@ async def send_site_notification(site: Site, event: str) -> None:
         return
 
     try:
-        ses = boto3.client(
-            "ses",
-            region_name=settings.aws_region,
-            aws_access_key_id=settings.aws_access_key_id,
-            aws_secret_access_key=settings.aws_secret_access_key,
-        )
+        ses_kwargs: dict = {"region_name": settings.aws_region}
+        if settings.aws_access_key_id:
+            ses_kwargs["aws_access_key_id"] = settings.aws_access_key_id
+            ses_kwargs["aws_secret_access_key"] = settings.aws_secret_access_key
+        ses = boto3.client("ses", **ses_kwargs)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None,
