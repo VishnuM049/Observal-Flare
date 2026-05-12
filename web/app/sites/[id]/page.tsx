@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { Site } from "@/lib/types";
@@ -66,9 +67,13 @@ export default function SiteDetailPage() {
       ws.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data);
+          const STABLE = ["running", "stopped", "sleeping", "destroyed", "failed"];
           if (event.type === "status_change") {
             setSite((prev) => prev ? { ...prev, status: event.status } : prev);
             setStageMessage(event.message);
+            if (STABLE.includes(event.status)) {
+              setTimeout(() => setStageMessage(null), 4000);
+            }
           } else if (event.type === "stage_progress") {
             setStageMessage(event.message);
           } else if (event.type === "error") {
@@ -212,13 +217,18 @@ export default function SiteDetailPage() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold">{site.name}</h1>
-          <StatusBadge status={site.status} />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">{site.name}</h1>
+            <StatusBadge status={site.status} />
+          </div>
+          <Link href="/sites" className="btn-primary">&larr; All Sites</Link>
         </div>
         {stageMessage && (
           <div className="mt-2 card px-3 py-2 flex items-center gap-2 text-sm" style={{ borderColor: "var(--color-accent-light)", backgroundColor: "var(--color-accent-light)" }}>
-            <span className="inline-block w-3 h-3 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-border)", borderTopColor: "var(--color-accent)" }} />
+            {!["running", "stopped", "sleeping", "destroyed", "failed"].includes(site.status) && (
+              <span className="inline-block w-3 h-3 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-border)", borderTopColor: "var(--color-accent)" }} />
+            )}
             <span style={{ color: "var(--color-accent)" }}>{stageMessage}</span>
           </div>
         )}
@@ -476,19 +486,19 @@ export default function SiteDetailPage() {
             </button>
           )}
           {site.status === "running" && (
-            <button onClick={() => doAction("stop")} disabled={actionLoading !== null} className="btn-warning">
+            <button onClick={() => doAction("stop")} disabled={actionLoading !== null} className="btn-primary">
               {actionLoading === "stop" ? "..." : "Stop"}
             </button>
           )}
           {["stopped", "sleeping"].includes(site.status) && (
-            <button onClick={() => doAction("start")} disabled={actionLoading !== null} className="btn-accent">
+            <button onClick={() => doAction("start")} disabled={actionLoading !== null} className="btn-primary">
               {actionLoading === "start" ? "..." : "Start"}
             </button>
           )}
           <button
             onClick={() => setShowDestroyConfirm(true)}
             disabled={actionLoading !== null}
-            className="btn-danger"
+            className="btn-primary"
           >
             {actionLoading === "destroy" ? "..." : "Destroy"}
           </button>

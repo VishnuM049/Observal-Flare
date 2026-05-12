@@ -149,6 +149,7 @@ async def create_site(
         idle_token=secrets.token_urlsafe(32),
     )
     db.add(site)
+    await db.flush()
 
     audit = AuditLog(user_id=user.id, site_id=site.id, action="site.created", details=audit_details(site, lifetime=f"{ttl_days}d" if ttl_days else "unlimited"))
     db.add(audit)

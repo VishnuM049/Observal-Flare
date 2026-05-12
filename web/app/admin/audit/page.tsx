@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AuditLogEntry } from "@/lib/types";
 import { auditLogs } from "@/lib/api-client";
 import { SelectField } from "@/components/select-field";
@@ -24,7 +25,10 @@ export default function AuditLogPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionFilter, setActionFilter] = useState("");
+  const [nameSearch, setNameSearch] = useState("");
   const [offset, setOffset] = useState(0);
+  const [pageInput, setPageInput] = useState("1");
+  const [editingPage, setEditingPage] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -43,10 +47,32 @@ export default function AuditLogPage() {
     load();
   }, [load]);
 
+  const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
+  const hasNext = entries.length === PAGE_SIZE;
+
+  useEffect(() => {
+    if (!editingPage) setPageInput(currentPage.toString());
+  }, [currentPage, editingPage]);
+
   function handleFilterChange(value: string) {
     setActionFilter(value);
     setOffset(0);
   }
+
+  function goToPage(page: number) {
+    const p = Math.max(1, page);
+    setOffset((p - 1) * PAGE_SIZE);
+    setEditingPage(false);
+  }
+
+  const filtered = useMemo(() => {
+    if (!nameSearch.trim()) return entries;
+    const q = nameSearch.toLowerCase();
+    return entries.filter((e) => {
+      const name = e.details?.name;
+      return typeof name === "string" && name.toLowerCase().includes(q);
+    });
+  }, [entries, nameSearch]);
 
   const ACTION_OPTIONS = [
     { value: "", label: "All actions" },
@@ -73,6 +99,14 @@ export default function AuditLogPage() {
             onChange={handleFilterChange}
             options={ACTION_OPTIONS}
             style={{ width: "16rem" }}
+          />
+          <input
+            type="text"
+            value={nameSearch}
+            onChange={(e) => setNameSearch(e.target.value)}
+            placeholder="Search by site name..."
+            className="input-field"
+            style={{ width: "14rem" }}
           />
         </div>
 
@@ -103,7 +137,7 @@ export default function AuditLogPage() {
                     <td className="px-4 py-4"><div className="skeleton h-3 w-40" /></td>
                   </tr>
                 ))}
-              {!loading && entries.length === 0 && (
+              {!loading && filtered.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-4 py-12 text-center">
                     <p style={{ color: "var(--color-ink-muted)" }}>No entries found.</p>
@@ -111,11 +145,15 @@ export default function AuditLogPage() {
                 </tr>
               )}
               {!loading &&
-                entries.map((entry) => (
+                filtered.map((entry) => (
                   <tr
                     key={entry.id}
-                    className="transition-colors hover:bg-[var(--color-cream)]"
+                    className={`transition-colors hover:bg-[var(--color-cream)] ${entry.site_id ? "cursor-pointer" : ""}`}
                     style={{ borderBottom: "1px solid var(--color-border)" }}
+                    onClick={() => {
+                      if (entry.site_id) window.location.href = `/sites/${entry.site_id}`;
+                    }}
+                    title={entry.site_id ? "Click to view site" : "No linked site"}
                   >
                     <td className="px-4 py-3 whitespace-nowrap" style={{ color: "var(--color-ink-muted)" }}>
                       {new Date(entry.created_at).toLocaleString()}
@@ -160,18 +198,34 @@ export default function AuditLogPage() {
 
         <div className="flex items-center gap-3 mt-4">
           <button
-            onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
-            disabled={offset === 0}
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage <= 1}
             className="btn-secondary"
           >
             &larr; Previous
           </button>
-          <span className="text-sm" style={{ color: "var(--color-ink-muted)" }}>
-            {offset + 1}–{offset + entries.length}
+          <span className="text-sm flex items-center gap-1" style={{ color: "var(--color-ink-muted)" }}>
+            Page{" "}
+            <input
+              type="text"
+              value={editingPage ? pageInput : currentPage.toString()}
+              onChange={(e) => {
+                setEditingPage(true);
+                setPageInput(e.target.value.replace(/\D/g, ""));
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") goToPage(Number(pageInput));
+                if (e.key === "Escape") { setEditingPage(false); (e.target as HTMLInputElement).blur(); }
+              }}
+              onBlur={() => { if (editingPage) goToPage(Number(pageInput)); }}
+              onFocus={(e) => { setEditingPage(true); setPageInput(currentPage.toString()); e.target.select(); }}
+              className="input-field text-center font-medium"
+              style={{ width: "3rem", padding: "0.125rem 0.25rem", fontSize: "0.875rem" }}
+            />
           </span>
           <button
-            onClick={() => setOffset(offset + PAGE_SIZE)}
-            disabled={entries.length < PAGE_SIZE}
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={!hasNext}
             className="btn-secondary"
           >
             Next &rarr;

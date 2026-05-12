@@ -90,7 +90,7 @@ export function DeploySourcePicker({
             type="button"
             onClick={validate}
             disabled={validating}
-            className="btn-secondary"
+            className="btn-primary"
           >
             {validating ? "..." : "Validate"}
           </button>

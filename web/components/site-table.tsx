@@ -39,17 +39,14 @@ export function SiteTable({ sites }: { sites: Site[] }) {
           {sites.map((site) => (
             <tr
               key={site.id}
-              className="transition-colors hover:bg-[var(--color-cream)]"
+              className="transition-colors hover:bg-[var(--color-cream)] cursor-pointer"
               style={{ borderBottom: "1px solid var(--color-border)" }}
+              onClick={() => (window.location.href = `/sites/${site.id}`)}
             >
               <td className="px-4 py-3">
-                <Link
-                  href={`/sites/${site.id}`}
-                  className="font-medium hover:underline"
-                  style={{ color: "var(--color-accent)" }}
-                >
+                <span className="font-medium" style={{ color: "var(--color-accent)" }}>
                   {site.name}
-                </Link>
+                </span>
                 <div className="text-xs" style={{ color: "var(--color-ink-muted)" }}>{site.domain}</div>
               </td>
               <td className="px-4 py-3">

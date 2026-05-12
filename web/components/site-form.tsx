@@ -253,7 +253,7 @@ export function SiteForm() {
         <button type="submit" disabled={loading} className="btn-primary">
           {loading ? "Creating..." : "Create Site"}
         </button>
-        <button type="button" onClick={() => router.back()} className="btn-secondary">
+        <button type="button" onClick={() => router.back()} className="btn-primary" style={{ backgroundColor: "var(--color-ink-muted)" }}>
           Cancel
         </button>
       </div>

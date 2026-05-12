@@ -16,6 +16,6 @@ async def validate_deploy_source(user: CurrentUser, type: str = Query(...), ref:
     try:
         sha = await github.resolve_ref(type, ref)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not resolve {type}/{ref}: {e}")
+        raise HTTPException(status_code=400, detail=f"Cannot find {type} '{ref}'")
 
     return {"type": type, "ref": ref, "resolved_sha": sha, "valid": True}
