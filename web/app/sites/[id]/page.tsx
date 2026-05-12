@@ -298,7 +298,7 @@ export default function SiteDetailPage() {
         </dl>
 
         {isActive && !editing && (
-          <button onClick={startEditing} className="btn-secondary mt-4">
+          <button onClick={startEditing} className="btn-primary mt-4">
             Edit Settings
           </button>
         )}

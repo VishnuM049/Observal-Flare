@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Site } from "@/lib/types";
 import { sites as sitesApi } from "@/lib/api-client";
 import { estimateDailyCost } from "@/lib/cost-estimate";
@@ -11,6 +11,7 @@ export default function SitesPage() {
   const [siteList, setSiteList] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     sitesApi
@@ -20,6 +21,14 @@ export default function SitesPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const filtered = useMemo(() => {
+    if (!search.trim()) return siteList;
+    const q = search.toLowerCase();
+    return siteList.filter(
+      (s) => s.name.toLowerCase().includes(q) || s.domain.toLowerCase().includes(q)
+    );
+  }, [siteList, search]);
+
   const runningCount = siteList.filter((s) => s.status === "running").length;
   const totalDaily = siteList.reduce((sum, s) => sum + estimateDailyCost(s.instance_size, s.sleep_mode), 0);
 
@@ -28,7 +37,7 @@ export default function SitesPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Sites</h1>
         <Link href="/sites/new" className="btn-primary">
-          New Site
+          New Site &rarr;
         </Link>
       </div>
 
@@ -46,6 +55,19 @@ export default function SitesPage() {
             <div className="section-label">Daily Cost</div>
             <div className="text-2xl font-bold mt-1">${totalDaily.toFixed(2)}</div>
           </div>
+        </div>
+      )}
+
+      {!loading && !error && siteList.length > 0 && (
+        <div className="mb-4">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or domain..."
+            className="input-field"
+            style={{ maxWidth: "24rem" }}
+          />
         </div>
       )}
 
@@ -67,13 +89,13 @@ export default function SitesPage() {
       {error && (
         <div className="card px-4 py-3 flex items-center justify-between" style={{ borderColor: "var(--color-danger)", backgroundColor: "var(--color-danger-light)" }}>
           <span className="text-sm" style={{ color: "var(--color-danger)" }}>{error}</span>
-          <button onClick={() => window.location.reload()} className="btn-secondary text-xs">
+          <button onClick={() => window.location.reload()} className="btn-secondary">
             Retry
           </button>
         </div>
       )}
 
-      {!loading && !error && <SiteTable sites={siteList} />}
+      {!loading && !error && <SiteTable sites={filtered} />}
     </div>
   );
 }

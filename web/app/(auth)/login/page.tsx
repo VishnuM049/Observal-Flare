@@ -49,8 +49,8 @@ function LoginContent() {
           Signing in...
         </div>
       ) : (
-        <a href={githubUrl} className="btn-primary text-base px-8 py-3">
-          Sign in with GitHub
+        <a href={githubUrl} className="btn-primary px-8 py-3">
+          Sign in with GitHub &rarr;
         </a>
       )}
       <button
