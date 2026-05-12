@@ -25,6 +25,9 @@ export default function SiteDetailPage() {
   const [editSleepMode, setEditSleepMode] = useState<SleepMode>("none");
   const [editAutoUpdate, setEditAutoUpdate] = useState(false);
   const [editAutoWipe, setEditAutoWipe] = useState(false);
+  const [editIdleTimeout, setEditIdleTimeout] = useState(120);
+  const [editSleepAtHour, setEditSleepAtHour] = useState(19);
+  const [editWakeAtHour, setEditWakeAtHour] = useState(7);
   const [editTtlDays, setEditTtlDays] = useState<number | null>(null);
   const [editRequestorEmail, setEditRequestorEmail] = useState("");
   const [editEnvOverrides, setEditEnvOverrides] = useState<Record<string, string>>({});
@@ -143,6 +146,9 @@ export default function SiteDetailPage() {
   function startEditing() {
     if (!site) return;
     setEditSleepMode(site.sleep_mode);
+    setEditIdleTimeout(site.idle_timeout_minutes);
+    setEditSleepAtHour(site.sleep_at_hour);
+    setEditWakeAtHour(site.wake_at_hour);
     setEditAutoUpdate(site.auto_update);
     setEditAutoWipe(site.auto_wipe_on_failure);
     setEditTtlDays(site.ttl_days);
@@ -157,6 +163,9 @@ export default function SiteDetailPage() {
     try {
       const updated = await sitesApi.update(site.id, {
         sleep_mode: editSleepMode,
+        idle_timeout_minutes: editSleepMode === "idle" ? editIdleTimeout : undefined,
+        sleep_at_hour: editSleepMode === "nightly" ? editSleepAtHour : undefined,
+        wake_at_hour: editSleepMode === "nightly" ? editWakeAtHour : undefined,
         auto_update: editAutoUpdate,
         auto_wipe_on_failure: editAutoWipe,
         ttl_days: editTtlDays === null ? 0 : editTtlDays,
@@ -261,7 +270,19 @@ export default function SiteDetailPage() {
           </div>
           <div>
             <dt className="section-label">Sleep Mode</dt>
-            <dd className="mt-1">{site.sleep_mode}</dd>
+            <dd className="mt-1">
+              {site.sleep_mode}
+              {site.sleep_mode === "idle" && (
+                <span className="ml-1" style={{ color: "var(--color-ink-muted)" }}>
+                  ({site.idle_timeout_minutes}min timeout)
+                </span>
+              )}
+              {site.sleep_mode === "nightly" && (
+                <span className="ml-1" style={{ color: "var(--color-ink-muted)" }}>
+                  (sleep {site.sleep_at_hour.toString().padStart(2, "0")}:00, wake {site.wake_at_hour.toString().padStart(2, "0")}:00 UTC)
+                </span>
+              )}
+            </dd>
           </div>
           <div>
             <dt className="section-label">Time-to-Live</dt>
@@ -316,11 +337,54 @@ export default function SiteDetailPage() {
                 onChange={(v) => setEditSleepMode(v as SleepMode)}
                 options={[
                   { value: "none", label: "None — always running" },
-                  { value: "nightly", label: "Nightly — stop at 7 PM daily" },
-                  { value: "idle", label: "Idle — stop after 2h no traffic" },
+                  { value: "nightly", label: "Nightly — scheduled sleep/wake" },
+                  { value: "idle", label: "Idle — stop after no traffic" },
                 ]}
               />
             </div>
+            {editSleepMode === "nightly" && (
+              <>
+                <div>
+                  <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Sleep At (UTC)</label>
+                  <SelectField
+                    value={editSleepAtHour.toString()}
+                    onChange={(v) => setEditSleepAtHour(Number(v))}
+                    options={Array.from({ length: 24 }, (_, i) => ({
+                      value: i.toString(),
+                      label: `${i.toString().padStart(2, "0")}:00 UTC`,
+                    }))}
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Wake At (UTC)</label>
+                  <SelectField
+                    value={editWakeAtHour.toString()}
+                    onChange={(v) => setEditWakeAtHour(Number(v))}
+                    options={Array.from({ length: 24 }, (_, i) => ({
+                      value: i.toString(),
+                      label: `${i.toString().padStart(2, "0")}:00 UTC`,
+                    }))}
+                  />
+                </div>
+              </>
+            )}
+            {editSleepMode === "idle" && (
+              <div>
+                <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Idle Timeout</label>
+                <SelectField
+                  value={editIdleTimeout.toString()}
+                  onChange={(v) => setEditIdleTimeout(Number(v))}
+                  options={[
+                    { value: "15", label: "15 minutes" },
+                    { value: "30", label: "30 minutes" },
+                    { value: "60", label: "1 hour" },
+                    { value: "120", label: "2 hours (default)" },
+                    { value: "240", label: "4 hours" },
+                    { value: "480", label: "8 hours" },
+                  ]}
+                />
+              </div>
+            )}
             <div>
               <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Time-to-Live</label>
               <SelectField

@@ -36,6 +36,9 @@ export interface Site {
   auto_update: boolean;
   auto_wipe_on_failure: boolean;
   sleep_mode: SleepMode;
+  idle_timeout_minutes: number;
+  sleep_at_hour: number;
+  wake_at_hour: number;
   instance_size: string;
   env_overrides: Record<string, string>;
   ip_address: string | null;
@@ -83,5 +86,8 @@ export interface SiteCreateRequest {
   auto_update?: boolean;
   auto_wipe_on_failure?: boolean;
   sleep_mode?: SleepMode;
+  idle_timeout_minutes?: number;
+  sleep_at_hour?: number;
+  wake_at_hour?: number;
   ttl_days?: number | null;
 }

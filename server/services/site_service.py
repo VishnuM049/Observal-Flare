@@ -88,6 +88,9 @@ async def create_site(
     auto_update: bool = False,
     auto_wipe_on_failure: bool | None = None,
     sleep_mode: SleepMode | None = None,
+    idle_timeout_minutes: int | None = None,
+    sleep_at_hour: int | None = None,
+    wake_at_hour: int | None = None,
     ttl_days: int | None = None,
 ) -> Site:
     validate_site_name(name)
@@ -125,6 +128,9 @@ async def create_site(
         auto_update=auto_update,
         auto_wipe_on_failure=auto_wipe_on_failure,
         sleep_mode=sleep_mode,
+        idle_timeout_minutes=idle_timeout_minutes or 120,
+        sleep_at_hour=sleep_at_hour if sleep_at_hour is not None else 19,
+        wake_at_hour=wake_at_hour if wake_at_hour is not None else 7,
         ttl_days=ttl_days,
         terraform_state_key=f"sites/{name}/terraform.tfstate",
         idle_token=secrets.token_urlsafe(32),

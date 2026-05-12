@@ -41,6 +41,9 @@ class SiteCreateRequest(BaseModel):
     auto_update: bool = False
     auto_wipe_on_failure: bool | None = None
     sleep_mode: SleepMode | None = None
+    idle_timeout_minutes: int | None = Field(default=None, ge=15, le=480)
+    sleep_at_hour: int | None = Field(default=None, ge=0, le=23)
+    wake_at_hour: int | None = Field(default=None, ge=0, le=23)
     ttl_days: int | None = Field(default=None, ge=1, le=365)
 
 
@@ -49,6 +52,9 @@ class SiteUpdateRequest(BaseModel):
     auto_update: bool | None = None
     auto_wipe_on_failure: bool | None = None
     sleep_mode: SleepMode | None = None
+    idle_timeout_minutes: int | None = Field(default=None, ge=15, le=480)
+    sleep_at_hour: int | None = Field(default=None, ge=0, le=23)
+    wake_at_hour: int | None = Field(default=None, ge=0, le=23)
     ttl_days: int | None = Field(default=None, ge=0, le=365)
     requestor_email: EmailStr | None = None
 
@@ -65,6 +71,9 @@ class SiteResponse(BaseModel):
     auto_update: bool
     auto_wipe_on_failure: bool
     sleep_mode: SleepMode
+    idle_timeout_minutes: int
+    sleep_at_hour: int
+    wake_at_hour: int
     instance_size: str
     env_overrides: dict
     ip_address: str | None
@@ -105,6 +114,9 @@ async def create_new_site(body: SiteCreateRequest, db: DB, user: CurrentUser):
             auto_update=body.auto_update,
             auto_wipe_on_failure=body.auto_wipe_on_failure,
             sleep_mode=body.sleep_mode,
+            idle_timeout_minutes=body.idle_timeout_minutes,
+            sleep_at_hour=body.sleep_at_hour,
+            wake_at_hour=body.wake_at_hour,
             ttl_days=body.ttl_days,
         )
     except SiteError as e:
@@ -143,6 +155,12 @@ async def update_site_config(site_id: uuid.UUID, body: SiteUpdateRequest, db: DB
         site.auto_wipe_on_failure = body.auto_wipe_on_failure
     if body.sleep_mode is not None:
         site.sleep_mode = body.sleep_mode
+    if body.idle_timeout_minutes is not None:
+        site.idle_timeout_minutes = body.idle_timeout_minutes
+    if body.sleep_at_hour is not None:
+        site.sleep_at_hour = body.sleep_at_hour
+    if body.wake_at_hour is not None:
+        site.wake_at_hour = body.wake_at_hour
     if body.requestor_email is not None:
         site.requestor_email = body.requestor_email
     if body.ttl_days is not None:

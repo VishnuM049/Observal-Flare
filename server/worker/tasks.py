@@ -130,12 +130,14 @@ async def task_sleep_site(ctx: dict, site_id: str) -> None:
 
 
 async def cron_nightly_sleep(ctx: dict) -> None:
-    """Stop containers on sleep_mode=nightly sites. Runs at 7 PM daily."""
+    """Sleep/wake nightly sites based on per-site sleep_at_hour and wake_at_hour. Runs hourly."""
+    current_hour = datetime.now(timezone.utc).hour
+
     async with async_session() as db:
         result = await db.execute(
             select(Site.id).where(
-                Site.status == SiteStatus.RUNNING,
                 Site.sleep_mode == SleepMode.NIGHTLY,
+                Site.status.in_([SiteStatus.RUNNING, SiteStatus.SLEEPING]),
             )
         )
         site_ids = list(result.scalars().all())
@@ -145,14 +147,23 @@ async def cron_nightly_sleep(ctx: dict) -> None:
         try:
             async with async_session() as db:
                 site = await db.get(Site, site_id)
-                if site is None or site.status != SiteStatus.RUNNING:
+                if site is None:
                     continue
-                await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
-                site.status = SiteStatus.SLEEPING
-                await db.commit()
-                logger.info("Nightly sleep: site %s now sleeping", site.name)
+
+                if site.status == SiteStatus.RUNNING and site.sleep_at_hour == current_hour:
+                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
+                    site.status = SiteStatus.SLEEPING
+                    await db.commit()
+                    await publish_site_event(str(site_id), "status_change", status="sleeping", message="Nightly sleep")
+                    logger.info("Nightly sleep: site %s now sleeping", site.name)
+                elif site.status == SiteStatus.SLEEPING and site.wake_at_hour == current_hour:
+                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
+                    site.status = SiteStatus.RUNNING
+                    await db.commit()
+                    await publish_site_event(str(site_id), "status_change", status="running", message="Nightly wake")
+                    logger.info("Nightly wake: site %s now running", site.name)
         except Exception:
-            logger.exception("Nightly sleep failed for site %s", site_id)
+            logger.exception("Nightly sleep/wake failed for site %s", site_id)
 
 
 async def cron_destroy_expired(ctx: dict) -> None:
@@ -226,7 +237,7 @@ class WorkerSettings:
         func(task_sleep_site, name="sleep_site"),
     ]
     cron_jobs = [
-        cron(cron_nightly_sleep, hour=19, minute=0),
+        cron(cron_nightly_sleep, minute=0),
         cron(cron_destroy_expired, minute=0),
         cron(cron_stale_reminders, hour=10, minute=0),
     ]

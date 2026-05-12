@@ -61,6 +61,9 @@ def upgrade() -> None:
         sa.Column("auto_wipe_on_failure", sa.Boolean, nullable=False, server_default=sa.text("true")),
         # Sleep/wake
         sa.Column("sleep_mode", sleep_mode_enum, nullable=False, server_default="none"),
+        sa.Column("idle_timeout_minutes", sa.Integer, nullable=False, server_default="120"),
+        sa.Column("sleep_at_hour", sa.Integer, nullable=False, server_default="19"),
+        sa.Column("wake_at_hour", sa.Integer, nullable=False, server_default="7"),
         # Auto-teardown
         sa.Column("scheduled_destroy_at", sa.DateTime(timezone=True), nullable=True),
         # Environment configuration

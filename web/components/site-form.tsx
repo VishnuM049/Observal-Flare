@@ -20,6 +20,9 @@ export function SiteForm() {
   const [autoUpdate, setAutoUpdate] = useState(false);
   const [autoWipeOnFailure, setAutoWipeOnFailure] = useState(true);
   const [sleepMode, setSleepMode] = useState<SleepMode>("none");
+  const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState(120);
+  const [sleepAtHour, setSleepAtHour] = useState(19);
+  const [wakeAtHour, setWakeAtHour] = useState(7);
   const [ttlDays, setTtlDays] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +48,9 @@ export function SiteForm() {
         auto_update: autoUpdate,
         auto_wipe_on_failure: autoWipeOnFailure,
         sleep_mode: sleepMode,
+        idle_timeout_minutes: sleepMode === "idle" ? idleTimeoutMinutes : undefined,
+        sleep_at_hour: sleepMode === "nightly" ? sleepAtHour : undefined,
+        wake_at_hour: sleepMode === "nightly" ? wakeAtHour : undefined,
         ttl_days: ttlDays ?? undefined,
       });
       router.push(`/sites/${site.id}`);
@@ -124,11 +130,59 @@ export function SiteForm() {
               onChange={(v) => setSleepMode(v as SleepMode)}
               options={[
                 { value: "none", label: "None — always running" },
-                { value: "nightly", label: "Nightly — stop at 7 PM daily" },
-                { value: "idle", label: "Idle — stop after 2h no traffic" },
+                { value: "nightly", label: "Nightly — scheduled sleep/wake" },
+                { value: "idle", label: "Idle — stop after no traffic" },
               ]}
             />
           </div>
+
+          {sleepMode === "nightly" && (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Sleep At (UTC)</label>
+                <SelectField
+                  value={sleepAtHour.toString()}
+                  onChange={(v) => setSleepAtHour(Number(v))}
+                  options={Array.from({ length: 24 }, (_, i) => ({
+                    value: i.toString(),
+                    label: `${i.toString().padStart(2, "0")}:00 UTC`,
+                  }))}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Wake At (UTC)</label>
+                <SelectField
+                  value={wakeAtHour.toString()}
+                  onChange={(v) => setWakeAtHour(Number(v))}
+                  options={Array.from({ length: 24 }, (_, i) => ({
+                    value: i.toString(),
+                    label: `${i.toString().padStart(2, "0")}:00 UTC`,
+                  }))}
+                />
+              </div>
+            </div>
+          )}
+
+          {sleepMode === "idle" && (
+            <div>
+              <label className="block text-sm font-medium mb-1">Idle Timeout</label>
+              <SelectField
+                value={idleTimeoutMinutes.toString()}
+                onChange={(v) => setIdleTimeoutMinutes(Number(v))}
+                options={[
+                  { value: "15", label: "15 minutes" },
+                  { value: "30", label: "30 minutes" },
+                  { value: "60", label: "1 hour" },
+                  { value: "120", label: "2 hours (default)" },
+                  { value: "240", label: "4 hours" },
+                  { value: "480", label: "8 hours" },
+                ]}
+              />
+              <p className="text-xs mt-1" style={{ color: "var(--color-ink-muted)" }}>
+                Site will sleep after this period of no traffic.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium mb-1">Time-to-Live</label>

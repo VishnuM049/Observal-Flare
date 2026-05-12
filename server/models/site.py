@@ -62,6 +62,9 @@ class Site(Base):
 
     # Sleep/wake
     sleep_mode: Mapped[SleepMode] = mapped_column(Enum(SleepMode, values_callable=lambda e: [x.value for x in e]), nullable=False, default=SleepMode.NONE)
+    idle_timeout_minutes: Mapped[int] = mapped_column(Integer, default=120)
+    sleep_at_hour: Mapped[int] = mapped_column(Integer, default=19)
+    wake_at_hour: Mapped[int] = mapped_column(Integer, default=7)
 
     # Auto-teardown
     scheduled_destroy_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

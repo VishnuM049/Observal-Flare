@@ -61,12 +61,13 @@ def _idle_cron_block(site: Site) -> str:
         return ""
     settings = get_settings()
     callback_url = f"{settings.flare_base_url}/api/sites/{site.id}/idle"
+    threshold_seconds = site.idle_timeout_minutes * 60
     return f"""
-# Idle detection: check nginx access log every 30 min, sleep after 2h idle
+# Idle detection: check nginx access log, sleep after {site.idle_timeout_minutes}min idle
 cat > /opt/observal/idle-check.sh << 'IDLEOF'
 #!/bin/bash
 LOG="/var/log/nginx/access.log"
-THRESHOLD=7200  # 2 hours in seconds
+THRESHOLD={threshold_seconds}
 if [ ! -f "$LOG" ]; then exit 0; fi
 LAST_MOD=$(stat -c %Y "$LOG" 2>/dev/null || stat -f %m "$LOG" 2>/dev/null)
 NOW=$(date +%s)
