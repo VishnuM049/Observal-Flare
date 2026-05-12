@@ -311,14 +311,25 @@ async def redeploy_site(
         await db.commit()
         await publish_site_event(str(site.id), "status_change", status="deploying", message="Redeploying...")
 
-        # Deploy updated code
+        # Deploy updated code — retry with volume wipe if init fails (schema migration mismatch)
         update_script = f"""#!/bin/bash
 set -euo pipefail
 exec > /var/log/flare-deploy.log 2>&1
 cd /opt/observal
 git fetch origin {shlex.quote(sha)}
 git checkout {shlex.quote(sha)}
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build
+
+COMPOSE="docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
+$COMPOSE up -d --build 2>&1
+
+# Check if init container failed (schema migration mismatch)
+if ! $COMPOSE ps observal-init 2>/dev/null | grep -q "Exited (0)"; then
+    if $COMPOSE logs observal-init 2>&1 | grep -q "Can't locate revision"; then
+        echo "=== Init failed due to migration mismatch, wiping data and retrying ==="
+        $COMPOSE down -v
+        $COMPOSE up -d --build
+    fi
+fi
 """
         cmd_result = await remote.run_command(site.instance_id, update_script)
         if cmd_result.status != "success":
