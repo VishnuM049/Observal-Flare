@@ -275,24 +275,3 @@ async def force_unlock(site_id: uuid.UUID, body: dict, db: DB, admin: AdminUser)
     await tf.force_unlock(site.name, lock_id)
 
 
-@router.get("/{site_id}/logs")
-async def get_site_logs(site_id: uuid.UUID, db: DB, user: CurrentUser):
-    try:
-        site = await get_site(db, site_id, user)
-    except SiteError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-    if not site.instance_id:
-        return {"logs": "No instance — site may not be provisioned yet."}
-
-    from server.config import get_settings
-    from server.mock import MockSSM
-    from server.ssm import RealSSM
-
-    remote = MockSSM() if get_settings().use_mock_ssm else RealSSM()
-    result = await remote.run_command(
-        site.instance_id,
-        "cd /opt/observal && docker compose logs --tail=200 2>&1",
-        timeout_seconds=30,
-    )
-    return {"logs": result.output}

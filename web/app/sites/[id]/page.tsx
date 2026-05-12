@@ -15,7 +15,6 @@ export default function SiteDetailPage() {
   const params = useParams();
   const id = params.id as string;
   const [site, setSite] = useState<Site | null>(null);
-  const [logs, setLogs] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -143,16 +142,6 @@ export default function SiteDetailPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }
-
-  async function fetchLogs() {
-    if (!site) return;
-    try {
-      const result = await sitesApi.logs(site.id);
-      setLogs(result.logs);
-    } catch (err: unknown) {
-      setLogs(err instanceof Error ? err.message : "Failed to fetch logs");
-    }
   }
 
   function startEditing() {
@@ -509,21 +498,6 @@ export default function SiteDetailPage() {
           >
             {actionLoading === "destroy" ? "..." : "Destroy"}
           </button>
-          <button onClick={fetchLogs} className="btn-secondary">
-            View Logs
-          </button>
-        </div>
-      )}
-
-      {logs !== null && (
-        <div className="card overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2" style={{ borderBottom: "1px solid var(--color-border)" }}>
-            <span className="section-label">Container Logs</span>
-            <button onClick={() => setLogs(null)} className="text-xs" style={{ color: "var(--color-ink-muted)" }}>Close</button>
-          </div>
-          <div className="p-4 font-mono text-xs overflow-x-auto max-h-96 overflow-y-auto whitespace-pre" style={{ backgroundColor: "var(--color-ink)", color: "var(--color-accent-light)" }}>
-            {logs}
-          </div>
         </div>
       )}
 

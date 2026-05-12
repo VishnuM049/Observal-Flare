@@ -64,8 +64,6 @@ export const sites = {
     request<Site>(`/api/sites/${id}/start`, { method: "POST" }),
   destroy: (id: string) =>
     request<Site>(`/api/sites/${id}/destroy`, { method: "POST" }),
-  logs: (id: string) =>
-    request<{ logs: string }>(`/api/sites/${id}/logs`),
   unlock: (id: string, lockId: string) =>
     request(`/api/sites/${id}/unlock`, {
       method: "POST",
