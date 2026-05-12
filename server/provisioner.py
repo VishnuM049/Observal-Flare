@@ -122,9 +122,9 @@ if ! [ -d "/etc/letsencrypt/live/{site.domain}" ]; then
     certbot certonly --standalone -d {site.domain} --non-interactive --agree-tos -m admin@observal.io
 fi
 
-# Start services
+# Start services (--build ensures we use the checked-out source, not stale registry images)
 cd /opt/observal
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build
 
 {_idle_cron_block(site)}
 echo "=== Deploy complete ==="
@@ -299,7 +299,7 @@ async def redeploy_site(
         # Wake if sleeping
         if site.status == SiteStatus.SLEEPING:
             await publish_site_event(str(site.id), "stage_progress", message="Waking from sleep...")
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             site.status = SiteStatus.RUNNING
             await db.commit()
 
@@ -318,7 +318,7 @@ exec > /var/log/flare-deploy.log 2>&1
 cd /opt/observal
 git fetch origin {shlex.quote(sha)}
 git checkout {shlex.quote(sha)}
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build
 """
         cmd_result = await remote.run_command(site.instance_id, update_script)
         if cmd_result.status != "success":
@@ -343,7 +343,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
 set -euo pipefail
 cd /opt/observal
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down -v
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build
 """
             await remote.run_command(site.instance_id, wipe_script)
             healthy = await _wait_for_healthy(site)
