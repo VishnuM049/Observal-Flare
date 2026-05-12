@@ -20,12 +20,6 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
     setNewValue("");
   }
 
-  function removeEntry(key: string) {
-    const next = { ...value };
-    delete next[key];
-    onChange(next);
-  }
-
   return (
     <div className="space-y-2">
       {entries.map(([k, v]) => (
@@ -33,19 +27,25 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
           <input
             value={k}
             disabled
-            className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm bg-gray-50 font-mono"
+            className="input-field flex-1 font-mono text-xs"
+            style={{ backgroundColor: "var(--color-cream)" }}
           />
           <input
             value={v}
             disabled={disabled}
             onChange={(e) => onChange({ ...value, [k]: e.target.value })}
-            className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm font-mono"
+            className="input-field flex-1 font-mono text-xs"
           />
           {!disabled && (
             <button
               type="button"
-              onClick={() => removeEntry(k)}
-              className="text-red-500 hover:text-red-700 text-sm px-2"
+              onClick={() => {
+                const next = { ...value };
+                delete next[k];
+                onChange(next);
+              }}
+              className="text-xs px-2 py-1 transition-colors"
+              style={{ color: "var(--color-danger)" }}
             >
               Remove
             </button>
@@ -58,22 +58,28 @@ export function EnvEditor({ value, onChange, disabled }: EnvEditorProps) {
             placeholder="KEY"
             value={newKey}
             onChange={(e) => setNewKey(e.target.value)}
-            className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm font-mono"
+            className="input-field flex-1 font-mono text-xs"
           />
           <input
             placeholder="value"
             value={newValue}
             onChange={(e) => setNewValue(e.target.value)}
-            className="flex-1 border border-gray-300 rounded px-2 py-1 text-sm font-mono"
+            className="input-field flex-1 font-mono text-xs"
           />
           <button
             type="button"
             onClick={addEntry}
-            className="text-blue-600 hover:text-blue-800 text-sm px-2 font-medium"
+            className="text-xs px-2 py-1 font-medium transition-colors"
+            style={{ color: "var(--color-accent)" }}
           >
             Add
           </button>
         </div>
+      )}
+      {entries.length === 0 && !disabled && (
+        <p className="text-xs" style={{ color: "var(--color-ink-muted)" }}>
+          No variables set. Examples: EVAL_MODEL_PROVIDER, EVAL_MODEL_API_KEY, DEPLOYMENT_MODE.
+        </p>
       )}
     </div>
   );

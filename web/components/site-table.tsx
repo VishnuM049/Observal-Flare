@@ -8,79 +8,88 @@ import { StatusBadge } from "./status-badge";
 export function SiteTable({ sites }: { sites: Site[] }) {
   if (sites.length === 0) {
     return (
-      <div className="text-center py-12 text-gray-500">
-        No sites yet.{" "}
-        <Link href="/sites/new" className="text-blue-600 hover:underline">
-          Create one
+      <div className="card text-center py-16 px-6">
+        <div className="text-4xl mb-3">~</div>
+        <p className="text-lg font-medium mb-1" style={{ color: "var(--color-ink)" }}>No sites yet</p>
+        <p className="text-sm mb-4" style={{ color: "var(--color-ink-muted)" }}>
+          Create your first Observal preview environment.
+        </p>
+        <Link href="/sites/new" className="btn-primary inline-block">
+          Create Site
         </Link>
       </div>
     );
   }
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+    <div className="card overflow-hidden">
       <table className="w-full text-sm">
-        <thead className="bg-gray-50 border-b border-gray-200">
-          <tr>
-            <th className="text-left px-4 py-3 font-medium">Name</th>
-            <th className="text-left px-4 py-3 font-medium">Status</th>
-            <th className="text-left px-4 py-3 font-medium">Deploy</th>
-            <th className="text-left px-4 py-3 font-medium">Size</th>
-            <th className="text-left px-4 py-3 font-medium">Cost</th>
-            <th className="text-left px-4 py-3 font-medium">Expires</th>
-            <th className="text-left px-4 py-3 font-medium">Created</th>
+        <thead style={{ borderBottom: "1px solid var(--color-border)" }}>
+          <tr className="text-left" style={{ color: "var(--color-ink-muted)" }}>
+            <th className="px-4 py-3 font-medium">Name</th>
+            <th className="px-4 py-3 font-medium">Status</th>
+            <th className="px-4 py-3 font-medium">Deploy</th>
+            <th className="px-4 py-3 font-medium">Size</th>
+            <th className="px-4 py-3 font-medium">Cost</th>
+            <th className="px-4 py-3 font-medium">Expires</th>
+            <th className="px-4 py-3 font-medium">Created</th>
           </tr>
         </thead>
-        <tbody className="divide-y divide-gray-100">
+        <tbody>
           {sites.map((site) => (
-            <tr key={site.id} className="hover:bg-gray-50">
+            <tr
+              key={site.id}
+              className="transition-colors hover:bg-[var(--color-cream)]"
+              style={{ borderBottom: "1px solid var(--color-border)" }}
+            >
               <td className="px-4 py-3">
                 <Link
                   href={`/sites/${site.id}`}
-                  className="font-medium text-blue-600 hover:underline"
+                  className="font-medium hover:underline"
+                  style={{ color: "var(--color-accent)" }}
                 >
                   {site.name}
                 </Link>
-                <div className="text-xs text-gray-400">{site.domain}</div>
+                <div className="text-xs" style={{ color: "var(--color-ink-muted)" }}>{site.domain}</div>
               </td>
               <td className="px-4 py-3">
                 <StatusBadge status={site.status} />
               </td>
-              <td className="px-4 py-3 text-gray-600">
+              <td className="px-4 py-3" style={{ color: "var(--color-ink-light)" }}>
                 {site.deploy_type}/{site.deploy_ref}
                 {site.resolved_sha && (
-                  <span className="text-xs text-gray-400 ml-1 font-mono">
+                  <span className="text-xs ml-1 font-mono" style={{ color: "var(--color-ink-muted)" }}>
                     ({site.resolved_sha.slice(0, 7)})
                   </span>
                 )}
               </td>
-              <td className="px-4 py-3 text-gray-600">{site.instance_size}</td>
-              <td className="px-4 py-3 text-gray-600">
+              <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--color-ink-light)" }}>{site.instance_size}</td>
+              <td className="px-4 py-3" style={{ color: "var(--color-ink-light)" }}>
                 {formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode))}
               </td>
-              <td className="px-4 py-3 text-gray-500">
+              <td className="px-4 py-3">
                 {site.scheduled_destroy_at ? (
-                  <span className="text-red-600 text-xs">
+                  <span className="text-xs" style={{ color: "var(--color-danger)" }}>
                     {new Date(site.scheduled_destroy_at).toLocaleDateString()}
                   </span>
                 ) : site.ttl_days ? (
-                  <span className="text-xs">{site.ttl_days}d</span>
+                  <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>{site.ttl_days}d</span>
                 ) : (
-                  <span className="text-gray-300 text-xs">--</span>
+                  <span className="text-xs" style={{ color: "var(--color-ink-muted)" }}>--</span>
                 )}
               </td>
-              <td className="px-4 py-3 text-gray-500">
+              <td className="px-4 py-3 text-xs" style={{ color: "var(--color-ink-muted)" }}>
                 {new Date(site.created_at).toLocaleDateString()}
               </td>
             </tr>
           ))}
         </tbody>
-        <tfoot className="bg-gray-50 border-t border-gray-200">
-          <tr>
-            <td className="px-4 py-3 font-medium text-gray-700" colSpan={4}>
+        <tfoot style={{ borderTop: "1px solid var(--color-border)" }}>
+          <tr style={{ backgroundColor: "var(--color-cream)" }}>
+            <td className="px-4 py-3 font-medium" style={{ color: "var(--color-ink-light)" }} colSpan={4}>
               Total ({sites.length} site{sites.length !== 1 ? "s" : ""})
             </td>
-            <td className="px-4 py-3 font-medium text-gray-700">
+            <td className="px-4 py-3 font-medium" style={{ color: "var(--color-ink-light)" }}>
               {formatDailyCost(sites.reduce((sum, s) => sum + estimateDailyCost(s.instance_size, s.sleep_mode), 0))}
             </td>
             <td colSpan={2}></td>

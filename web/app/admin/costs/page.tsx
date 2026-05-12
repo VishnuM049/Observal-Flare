@@ -45,9 +45,9 @@ function CostChart({ history, projection }: { history: DayCost[]; projection: Da
         <g key={val}>
           <line
             x1={PAD.left} y1={y(val)} x2={CHART_W - PAD.right} y2={y(val)}
-            stroke="#e5e7eb" strokeWidth={1}
+            stroke="#D9D4C9" strokeWidth={1}
           />
-          <text x={PAD.left - 8} y={y(val) + 4} textAnchor="end" fontSize={11} fill="#6b7280">
+          <text x={PAD.left - 8} y={y(val) + 4} textAnchor="end" fontSize={11} fill="#8A8A7A">
             ${val.toFixed(0)}
           </text>
         </g>
@@ -58,7 +58,7 @@ function CostChart({ history, projection }: { history: DayCost[]; projection: Da
           <text
             key={d.date}
             x={x(i)} y={CHART_H - PAD.bottom + 18}
-            textAnchor="middle" fontSize={10} fill="#6b7280"
+            textAnchor="middle" fontSize={10} fill="#8A8A7A"
             transform={`rotate(-35, ${x(i)}, ${CHART_H - PAD.bottom + 18})`}
           >
             {d.date.slice(5)}
@@ -70,24 +70,24 @@ function CostChart({ history, projection }: { history: DayCost[]; projection: Da
         <line
           x1={x(history.length - 1)} y1={PAD.top}
           x2={x(history.length - 1)} y2={PAD.top + INNER_H}
-          stroke="#9ca3af" strokeWidth={1} strokeDasharray="4 3"
+          stroke="#D9D4C9" strokeWidth={1} strokeDasharray="4 3"
         />
       )}
 
-      <path d={historyPath} fill="none" stroke="#2563eb" strokeWidth={2} />
+      <path d={historyPath} fill="none" stroke="#2D6A4F" strokeWidth={2} />
 
       {projection.length > 0 && (
-        <path d={projPath} fill="none" stroke="#2563eb" strokeWidth={2} strokeDasharray="6 4" opacity={0.5} />
+        <path d={projPath} fill="none" stroke="#2D6A4F" strokeWidth={2} strokeDasharray="6 4" opacity={0.5} />
       )}
 
       {history.map((d, i) => (
-        <circle key={`h-${d.date}`} cx={x(i)} cy={y(d.cost)} r={2.5} fill="#2563eb" />
+        <circle key={`h-${d.date}`} cx={x(i)} cy={y(d.cost)} r={2.5} fill="#2D6A4F" />
       ))}
       {projection.map((d, i) => (
-        <circle key={`p-${d.date}`} cx={x(projStart + 1 + i)} cy={y(d.cost)} r={2.5} fill="#2563eb" opacity={0.4} />
+        <circle key={`p-${d.date}`} cx={x(projStart + 1 + i)} cy={y(d.cost)} r={2.5} fill="#2D6A4F" opacity={0.4} />
       ))}
 
-      <text x={PAD.left + 4} y={PAD.top - 6} fontSize={11} fill="#6b7280">Daily cost ($)</text>
+      <text x={PAD.left + 4} y={PAD.top - 6} fontSize={11} fill="#8A8A7A">Daily cost ($)</text>
     </svg>
   );
 }
@@ -105,8 +105,29 @@ export default function CostsPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <p className="text-gray-500">Loading...</p>;
-  if (error) return <div className="bg-red-50 text-red-700 px-4 py-2 rounded-md text-sm">{error}</div>;
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <div className="skeleton h-8 w-40" />
+        <div className="grid grid-cols-3 gap-4">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <div key={i} className="card p-4"><div className="skeleton h-3 w-16 mb-2" /><div className="skeleton h-6 w-24" /></div>
+          ))}
+        </div>
+        <div className="card p-6"><div className="skeleton h-48 w-full" /></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="card px-4 py-3 flex items-center justify-between" style={{ borderColor: "var(--color-danger)", backgroundColor: "var(--color-danger-light)" }}>
+        <span className="text-sm" style={{ color: "var(--color-danger)" }}>{error}</span>
+        <button onClick={() => window.location.reload()} className="btn-secondary text-xs">Retry</button>
+      </div>
+    );
+  }
+
   if (!data) return null;
 
   const historyTotal = data.history.reduce((sum, d) => sum + d.cost, 0);
@@ -116,30 +137,30 @@ export default function CostsPage() {
       <h1 className="text-2xl font-bold">Cost Overview</h1>
 
       <div className="grid grid-cols-3 gap-4">
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="text-sm text-gray-500">Today</div>
-          <div className="text-2xl font-bold">${data.today_daily.toFixed(2)}<span className="text-sm font-normal text-gray-400">/day</span></div>
-          <div className="text-xs text-gray-400">{data.today_site_count} active site{data.today_site_count !== 1 ? "s" : ""}</div>
+        <div className="card p-4">
+          <div className="section-label">Today</div>
+          <div className="text-2xl font-bold mt-1">${data.today_daily.toFixed(2)}<span className="text-sm font-normal ml-1" style={{ color: "var(--color-ink-muted)" }}>/day</span></div>
+          <div className="text-xs mt-1" style={{ color: "var(--color-ink-muted)" }}>{data.today_site_count} active site{data.today_site_count !== 1 ? "s" : ""}</div>
         </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="text-sm text-gray-500">Last 30 days</div>
-          <div className="text-2xl font-bold">${historyTotal.toFixed(2)}</div>
-          <div className="text-xs text-gray-400">total incurred</div>
+        <div className="card p-4">
+          <div className="section-label">Last 30 days</div>
+          <div className="text-2xl font-bold mt-1">${historyTotal.toFixed(2)}</div>
+          <div className="text-xs mt-1" style={{ color: "var(--color-ink-muted)" }}>total incurred</div>
         </div>
-        <div className="bg-white border border-gray-200 rounded-lg p-4">
-          <div className="text-sm text-gray-500">Next 14 days</div>
-          <div className="text-2xl font-bold">${data.projection.reduce((sum, d) => sum + d.cost, 0).toFixed(2)}</div>
-          <div className="text-xs text-gray-400">projected (accounts for TTLs)</div>
+        <div className="card p-4">
+          <div className="section-label">Next 14 days</div>
+          <div className="text-2xl font-bold mt-1">${data.projection.reduce((sum, d) => sum + d.cost, 0).toFixed(2)}</div>
+          <div className="text-xs mt-1" style={{ color: "var(--color-ink-muted)" }}>projected (accounts for TTLs)</div>
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg p-6">
-        <div className="flex items-center gap-4 mb-4 text-xs text-gray-500">
+      <div className="card p-6">
+        <div className="flex items-center gap-4 mb-4 text-xs" style={{ color: "var(--color-ink-muted)" }}>
           <span className="flex items-center gap-1">
-            <span className="inline-block w-4 h-0.5 bg-blue-600"></span> History
+            <span className="inline-block w-4 h-0.5" style={{ backgroundColor: "var(--color-accent)" }}></span> History
           </span>
           <span className="flex items-center gap-1">
-            <span className="inline-block w-4 h-0.5 bg-blue-600 opacity-50" style={{ borderTop: "2px dashed" }}></span> Projection
+            <span className="inline-block w-4 h-0.5 opacity-50" style={{ backgroundColor: "var(--color-accent)", borderTop: "2px dashed" }}></span> Projection
           </span>
         </div>
         <CostChart history={data.history} projection={data.projection} />

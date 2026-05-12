@@ -7,18 +7,23 @@ import { auth } from "@/lib/api-client";
 function LoginContent() {
   const searchParams = useSearchParams();
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
   const clientId = process.env.NEXT_PUBLIC_GITHUB_CLIENT_ID || "";
 
   useEffect(() => {
     const code = searchParams.get("code");
     if (code) {
+      setLoading(true);
       auth
         .login(code)
         .then(() => {
           window.location.href = "/sites";
         })
-        .catch((err) => setError(err.message));
+        .catch((err) => {
+          setError(err.message);
+          setLoading(false);
+        });
     }
   }, [searchParams]);
 
@@ -26,31 +31,43 @@ function LoginContent() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-[60vh] gap-6">
-      <h1 className="text-3xl font-bold">Sign in to Flare</h1>
-      <p className="text-gray-500">
+      <h1 className="text-3xl font-bold" style={{ color: "var(--color-ink)" }}>
+        Sign in to Flare
+      </h1>
+      <p style={{ color: "var(--color-ink-muted)" }}>
         Manage Observal preview environments
       </p>
       {error && (
-        <div className="bg-red-50 text-red-700 px-4 py-2 rounded-md text-sm">
-          {error}
+        <div className="card px-4 py-3 flex items-center gap-2 text-sm" style={{ borderColor: "var(--color-danger)", backgroundColor: "var(--color-danger-light)", color: "var(--color-danger)" }}>
+          <span>!</span>
+          <span>{error}</span>
         </div>
       )}
-      <a
-        href={githubUrl}
-        className="bg-gray-900 text-white px-6 py-3 rounded-lg font-medium hover:bg-gray-800 transition-colors"
-      >
-        Sign in with GitHub
-      </a>
+      {loading ? (
+        <div className="flex items-center gap-2 text-sm" style={{ color: "var(--color-ink-muted)" }}>
+          <span className="inline-block w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-border)", borderTopColor: "var(--color-accent)" }} />
+          Signing in...
+        </div>
+      ) : (
+        <a href={githubUrl} className="btn-primary text-base px-8 py-3">
+          Sign in with GitHub
+        </a>
+      )}
       <button
         onClick={() => {
+          setLoading(true);
           auth
             .devLogin()
             .then(() => {
               window.location.href = "/sites";
             })
-            .catch((err) => setError(err.message));
+            .catch((err) => {
+              setError(err.message);
+              setLoading(false);
+            });
         }}
-        className="text-sm text-gray-400 hover:text-gray-600 underline"
+        className="text-sm underline"
+        style={{ color: "var(--color-ink-muted)" }}
       >
         Dev Login (local only)
       </button>
@@ -60,7 +77,13 @@ function LoginContent() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="flex justify-center py-20">Loading...</div>}>
+    <Suspense
+      fallback={
+        <div className="flex justify-center py-20">
+          <span className="inline-block w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "var(--color-border)", borderTopColor: "var(--color-accent)" }} />
+        </div>
+      }
+    >
       <LoginContent />
     </Suspense>
   );

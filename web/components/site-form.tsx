@@ -7,6 +7,7 @@ import { sites } from "@/lib/api-client";
 import { estimateDailyCost, formatDailyCost } from "@/lib/cost-estimate";
 import { DeploySourcePicker } from "./deploy-source-picker";
 import { EnvEditor } from "./env-editor";
+import { SelectField } from "./select-field";
 
 export function SiteForm() {
   const router = useRouter();
@@ -55,132 +56,153 @@ export function SiteForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-2xl space-y-6">
+    <form onSubmit={handleSubmit} className="max-w-2xl space-y-8">
       {error && (
-        <div className="bg-red-50 text-red-700 px-4 py-2 rounded-md text-sm">{error}</div>
+        <div className="card px-4 py-3 text-sm" style={{ borderColor: "var(--color-danger)", backgroundColor: "var(--color-danger-light)", color: "var(--color-danger)" }}>
+          {error}
+        </div>
       )}
 
-      <div>
-        <label className="block text-sm font-medium mb-1">Site Name</label>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
-          placeholder="my-site"
-          required
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-        />
-        <p className="text-xs text-gray-400 mt-1">
-          Becomes the subdomain: {name || "my-site"}.observal.io
-        </p>
-      </div>
+      <section>
+        <h2 className="section-label mb-4">Basic Info</h2>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Site Name <span style={{ color: "var(--color-danger)" }}>*</span></label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ""))}
+              placeholder="my-site"
+              required
+              className="input-field"
+            />
+            <p className="text-xs mt-1" style={{ color: "var(--color-ink-muted)" }}>
+              Becomes the subdomain: {name || "my-site"}.observal.io
+            </p>
+          </div>
 
-      <DeploySourcePicker
-        deployType={deployType}
-        deployRef={deployRef}
-        onTypeChange={setDeployType}
-        onRefChange={setDeployRef}
-      />
-
-      <div>
-        <label className="block text-sm font-medium mb-1">Requestor Email</label>
-        <input
-          type="email"
-          value={requestorEmail}
-          onChange={(e) => setRequestorEmail(e.target.value)}
-          required
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-        />
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-1">Instance Size</label>
-        <select
-          value={instanceSize}
-          onChange={(e) => setInstanceSize(e.target.value)}
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-        >
-          <option value="t3.medium">t3.medium (4 GB)</option>
-          <option value="t3.large">t3.large (8 GB)</option>
-          <option value="t3.xlarge">t3.xlarge (16 GB)</option>
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-1">Sleep Mode</label>
-        <select
-          value={sleepMode}
-          onChange={(e) => setSleepMode(e.target.value as SleepMode)}
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-        >
-          <option value="none">None — always running</option>
-          <option value="nightly">Nightly — stop at 7 PM daily</option>
-          <option value="idle">Idle — stop after 2h no traffic</option>
-        </select>
-      </div>
-
-      <div>
-        <label className="block text-sm font-medium mb-1">Time-to-Live</label>
-        <select
-          value={ttlDays ?? ""}
-          onChange={(e) => setTtlDays(e.target.value ? Number(e.target.value) : null)}
-          className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
-        >
-          <option value="">No limit</option>
-          <option value="1">1 day</option>
-          <option value="3">3 days</option>
-          <option value="7">7 days</option>
-          <option value="14">14 days</option>
-          <option value="30">30 days</option>
-        </select>
-        <p className="text-xs text-gray-400 mt-1">
-          After this period, you&#39;ll receive a warning and the site will be destroyed 12 hours later.
-        </p>
-      </div>
-
-      <div className="bg-gray-50 border border-gray-200 rounded-md px-4 py-3 text-sm">
-        <span className="text-gray-500">Estimated cost: </span>
-        <span className="font-medium">
-          {formatDailyCost(estimateDailyCost(instanceSize, sleepMode))}
-        </span>
-        {ttlDays && (
-          <span className="text-gray-500 ml-2">
-            (~${(estimateDailyCost(instanceSize, sleepMode) * ttlDays).toFixed(2)} total for {ttlDays} day{ttlDays > 1 ? "s" : ""})
-          </span>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={autoUpdate}
-            onChange={(e) => setAutoUpdate(e.target.checked)}
+          <DeploySourcePicker
+            deployType={deployType}
+            deployRef={deployRef}
+            onTypeChange={setDeployType}
+            onRefChange={setDeployRef}
           />
-          Auto-update on push
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={autoWipeOnFailure}
-            onChange={(e) => setAutoWipeOnFailure(e.target.checked)}
-          />
-          Auto-wipe data on failed redeploy
-        </label>
-      </div>
 
-      <div>
-        <label className="block text-sm font-medium mb-2">Environment Overrides</label>
+          <div>
+            <label className="block text-sm font-medium mb-1">Requestor Email <span style={{ color: "var(--color-danger)" }}>*</span></label>
+            <input
+              type="email"
+              value={requestorEmail}
+              onChange={(e) => setRequestorEmail(e.target.value)}
+              required
+              className="input-field"
+            />
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="section-label mb-4">Configuration</h2>
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Instance Size</label>
+            <SelectField
+              value={instanceSize}
+              onChange={setInstanceSize}
+              options={[
+                { value: "t3.medium", label: "t3.medium — 2 vCPU, 4 GB (~$1.00/day)" },
+                { value: "t3.large", label: "t3.large — 2 vCPU, 8 GB (~$2.00/day)" },
+                { value: "t3.xlarge", label: "t3.xlarge — 4 vCPU, 16 GB (~$3.80/day)" },
+              ]}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Sleep Mode</label>
+            <SelectField
+              value={sleepMode}
+              onChange={(v) => setSleepMode(v as SleepMode)}
+              options={[
+                { value: "none", label: "None — always running" },
+                { value: "nightly", label: "Nightly — stop at 7 PM daily" },
+                { value: "idle", label: "Idle — stop after 2h no traffic" },
+              ]}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1">Time-to-Live</label>
+            <SelectField
+              value={ttlDays?.toString() ?? ""}
+              onChange={(v) => setTtlDays(v ? Number(v) : null)}
+              options={[
+                { value: "", label: "No limit" },
+                { value: "1", label: "1 day" },
+                { value: "3", label: "3 days" },
+                { value: "7", label: "7 days" },
+                { value: "14", label: "14 days" },
+                { value: "30", label: "30 days" },
+              ]}
+            />
+            <p className="text-xs mt-1" style={{ color: "var(--color-ink-muted)" }}>
+              After this period, a warning is sent and the site is destroyed 12 hours later.
+            </p>
+          </div>
+
+          <div className="card px-4 py-3 text-sm">
+            <span style={{ color: "var(--color-ink-muted)" }}>Estimated cost: </span>
+            <span className="font-medium">
+              {formatDailyCost(estimateDailyCost(instanceSize, sleepMode))}
+            </span>
+            {ttlDays && (
+              <span className="ml-2" style={{ color: "var(--color-ink-muted)" }}>
+                (~${(estimateDailyCost(instanceSize, sleepMode) * ttlDays).toFixed(2)} total for {ttlDays} day{ttlDays > 1 ? "s" : ""})
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="section-label mb-4">Automation</h2>
+        <div className="space-y-3">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoUpdate}
+              onChange={(e) => setAutoUpdate(e.target.checked)}
+              className="accent-[var(--color-accent)]"
+            />
+            Auto-update on push
+          </label>
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoWipeOnFailure}
+              onChange={(e) => setAutoWipeOnFailure(e.target.checked)}
+              className="accent-[var(--color-accent)]"
+            />
+            Auto-wipe data on failed redeploy
+          </label>
+        </div>
+      </section>
+
+      <section>
+        <h2 className="section-label mb-2">Environment Variables</h2>
+        <p className="text-xs mb-3" style={{ color: "var(--color-ink-muted)" }}>
+          Custom variables merged into the Observal instance&apos;s .env file. Use these to configure model providers, API keys, or deployment-specific settings.
+        </p>
         <EnvEditor value={envOverrides} onChange={setEnvOverrides} />
-      </div>
+      </section>
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="bg-blue-600 text-white px-6 py-2 rounded-md font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-      >
-        {loading ? "Creating..." : "Create Site"}
-      </button>
+      <div className="flex items-center gap-3 pt-2">
+        <button type="submit" disabled={loading} className="btn-primary">
+          {loading ? "Creating..." : "Create Site"}
+        </button>
+        <button type="button" onClick={() => router.back()} className="btn-secondary">
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }

@@ -1,23 +1,26 @@
 import type { SiteStatus } from "@/lib/types";
 
-const STATUS_STYLES: Record<SiteStatus, string> = {
-  pending: "bg-gray-100 text-gray-700",
-  provisioning: "bg-blue-100 text-blue-700",
-  deploying: "bg-blue-100 text-blue-700",
-  running: "bg-green-100 text-green-700",
-  stopping: "bg-yellow-100 text-yellow-700",
-  stopped: "bg-gray-100 text-gray-700",
-  sleeping: "bg-purple-100 text-purple-700",
-  destroying: "bg-red-100 text-red-700",
-  destroyed: "bg-gray-100 text-gray-400",
-  failed: "bg-red-100 text-red-700",
+const STATUS_CONFIG: Record<SiteStatus, { bg: string; text: string; icon: string }> = {
+  pending: { bg: "#F3F4F6", text: "#4B5563", icon: "○" },
+  provisioning: { bg: "#DBEAFE", text: "#1D4ED8", icon: "◦" },
+  deploying: { bg: "#DBEAFE", text: "#1D4ED8", icon: "◦" },
+  running: { bg: "var(--color-accent-light)", text: "var(--color-accent)", icon: "✓" },
+  stopping: { bg: "var(--color-warning-light)", text: "var(--color-warning)", icon: "●" },
+  stopped: { bg: "#F3F4F6", text: "#6B7280", icon: "■" },
+  sleeping: { bg: "#F3E8FF", text: "#7C3AED", icon: "☾" },
+  destroying: { bg: "var(--color-danger-light)", text: "var(--color-danger)", icon: "✕" },
+  destroyed: { bg: "#F3F4F6", text: "#9CA3AF", icon: "✕" },
+  failed: { bg: "var(--color-danger-light)", text: "var(--color-danger)", icon: "!" },
 };
 
 export function StatusBadge({ status }: { status: SiteStatus }) {
+  const config = STATUS_CONFIG[status];
   return (
     <span
-      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[status]}`}
+      className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium"
+      style={{ backgroundColor: config.bg, color: config.text }}
     >
+      <span aria-hidden="true">{config.icon}</span>
       {status}
     </span>
   );

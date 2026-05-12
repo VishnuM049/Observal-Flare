@@ -6,6 +6,18 @@ import { auditLogs } from "@/lib/api-client";
 
 const PAGE_SIZE = 50;
 
+const ACTION_COLORS: Record<string, string> = {
+  "site.created": "var(--color-accent)",
+  "site.redeployed": "#1D4ED8",
+  "site.redeploy_requested": "#1D4ED8",
+  "site.stopped": "var(--color-warning)",
+  "site.stop_requested": "var(--color-warning)",
+  "site.started": "var(--color-accent)",
+  "site.start_requested": "var(--color-accent)",
+  "site.destroyed": "var(--color-danger)",
+  "site.destroy_requested": "var(--color-danger)",
+};
+
 export default function AuditLogPage() {
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -43,7 +55,8 @@ export default function AuditLogPage() {
         <select
           value={actionFilter}
           onChange={(e) => handleFilterChange(e.target.value)}
-          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+          className="input-field"
+          style={{ width: "auto" }}
         >
           <option value="">All actions</option>
           <option value="site.created">site.created</option>
@@ -59,65 +72,79 @@ export default function AuditLogPage() {
       </div>
 
       {error && (
-        <div className="bg-red-50 text-red-700 px-4 py-2 rounded-md text-sm mb-4">
-          {error}
+        <div className="card px-4 py-3 flex items-center justify-between mb-4" style={{ borderColor: "var(--color-danger)", backgroundColor: "var(--color-danger-light)" }}>
+          <span className="text-sm" style={{ color: "var(--color-danger)" }}>{error}</span>
+          <button onClick={load} className="btn-secondary text-xs">Retry</button>
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+      <div className="card overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-left text-gray-500">
-            <tr>
+          <thead style={{ borderBottom: "1px solid var(--color-border)" }}>
+            <tr className="text-left" style={{ color: "var(--color-ink-muted)" }}>
               <th className="px-4 py-3 font-medium">Time</th>
               <th className="px-4 py-3 font-medium">User</th>
               <th className="px-4 py-3 font-medium">Action</th>
               <th className="px-4 py-3 font-medium">Details</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
-            {loading && (
-              <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
-                  Loading...
-                </td>
-              </tr>
-            )}
+          <tbody>
+            {loading &&
+              Array.from({ length: 8 }).map((_, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                  <td className="px-4 py-4"><div className="skeleton h-3 w-28" /></td>
+                  <td className="px-4 py-4"><div className="skeleton h-3 w-20" /></td>
+                  <td className="px-4 py-4"><div className="skeleton h-3 w-24" /></td>
+                  <td className="px-4 py-4"><div className="skeleton h-3 w-40" /></td>
+                </tr>
+              ))}
             {!loading && entries.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
-                  No audit log entries found.
+                <td colSpan={4} className="px-4 py-12 text-center">
+                  <div className="text-2xl mb-2" style={{ color: "var(--color-ink-muted)" }}>~</div>
+                  <p style={{ color: "var(--color-ink-muted)" }}>No audit log entries found.</p>
                 </td>
               </tr>
             )}
             {!loading &&
               entries.map((entry) => (
-                <tr key={entry.id} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
+                <tr
+                  key={entry.id}
+                  className="transition-colors hover:bg-[var(--color-cream)]"
+                  style={{ borderBottom: "1px solid var(--color-border)" }}
+                >
+                  <td className="px-4 py-3 whitespace-nowrap" style={{ color: "var(--color-ink-muted)" }}>
                     {new Date(entry.created_at).toLocaleString()}
                   </td>
                   <td className="px-4 py-3">
-                    <div>{entry.user_name || "Unknown"}</div>
+                    <div style={{ color: "var(--color-ink)" }}>{entry.user_name || "Unknown"}</div>
                     {entry.user_email && (
-                      <div className="text-xs text-gray-400">{entry.user_email}</div>
+                      <div className="text-xs" style={{ color: "var(--color-ink-muted)" }}>{entry.user_email}</div>
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="font-mono text-xs bg-gray-100 px-2 py-0.5 rounded">
+                    <span
+                      className="font-mono text-xs px-2 py-0.5 rounded"
+                      style={{
+                        backgroundColor: "var(--color-cream)",
+                        color: ACTION_COLORS[entry.action] || "var(--color-ink-light)",
+                      }}
+                    >
                       {entry.action}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600 max-w-md">
+                  <td className="px-4 py-3 text-sm max-w-md" style={{ color: "var(--color-ink-light)" }}>
                     {entry.details && Object.keys(entry.details).length > 0 ? (
                       <div className="flex flex-wrap gap-x-4 gap-y-1">
                         {Object.entries(entry.details).map(([key, value]) => (
                           <span key={key}>
-                            <span className="text-gray-400">{key.replace(/_/g, " ")}:</span>{" "}
+                            <span style={{ color: "var(--color-ink-muted)" }}>{key.replace(/_/g, " ")}:</span>{" "}
                             {String(value)}
                           </span>
                         ))}
                       </div>
                     ) : (
-                      <span className="text-gray-300">—</span>
+                      <span style={{ color: "var(--color-ink-muted)" }}>—</span>
                     )}
                   </td>
                 </tr>
@@ -130,17 +157,17 @@ export default function AuditLogPage() {
         <button
           onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
           disabled={offset === 0}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Previous
         </button>
-        <span className="text-sm text-gray-500">
+        <span className="text-sm" style={{ color: "var(--color-ink-muted)" }}>
           Showing {offset + 1}–{offset + entries.length}
         </span>
         <button
           onClick={() => setOffset(offset + PAGE_SIZE)}
           disabled={entries.length < PAGE_SIZE}
-          className="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Next
         </button>

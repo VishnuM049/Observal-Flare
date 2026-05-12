@@ -1,1 +1,134 @@
 @import "tailwindcss";
+
+@layer base {
+  :root {
+    --color-cream: #F5F0E8;
+    --color-cream-dark: #EDE7DB;
+    --color-ink: #1A1A1A;
+    --color-ink-light: #4A4A4A;
+    --color-ink-muted: #8A8A7A;
+    --color-accent: #2D6A4F;
+    --color-accent-light: #D4E7DC;
+    --color-border: #D9D4C9;
+    --color-card: #FFFFFF;
+    --color-danger: #C53030;
+    --color-danger-light: #FEE2E2;
+    --color-warning: #B7791F;
+    --color-warning-light: #FEFCE8;
+  }
+
+  body {
+    background-color: var(--color-cream);
+    color: var(--color-ink);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+@layer components {
+  .btn-primary {
+    background-color: var(--color-ink);
+    color: white;
+    padding: 0.5rem 1.25rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 0.15s;
+    &:hover { background-color: #333; }
+    &:disabled { opacity: 0.5; }
+  }
+
+  .btn-secondary {
+    background-color: transparent;
+    color: var(--color-ink);
+    padding: 0.5rem 1.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 0.15s;
+    &:hover { background-color: var(--color-cream-dark); }
+    &:disabled { opacity: 0.5; }
+  }
+
+  .btn-danger {
+    background-color: var(--color-danger);
+    color: white;
+    padding: 0.5rem 1.25rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 0.15s;
+    &:hover { background-color: #9B2C2C; }
+    &:disabled { opacity: 0.5; }
+  }
+
+  .btn-warning {
+    background-color: var(--color-warning);
+    color: white;
+    padding: 0.5rem 1.25rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 0.15s;
+    &:hover { background-color: #975A16; }
+    &:disabled { opacity: 0.5; }
+  }
+
+  .btn-accent {
+    background-color: var(--color-accent);
+    color: white;
+    padding: 0.5rem 1.25rem;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: background-color 0.15s;
+    &:hover { background-color: #245840; }
+    &:disabled { opacity: 0.5; }
+  }
+
+  .card {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-border);
+    border-radius: 0.5rem;
+  }
+
+  .section-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-ink-muted);
+  }
+
+  .input-field {
+    width: 100%;
+    border: 1px solid var(--color-border);
+    border-radius: 0.375rem;
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+    background-color: white;
+    color: var(--color-ink);
+    transition: border-color 0.15s;
+    &:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-light); }
+  }
+
+  select.input-field {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%238A8A7A' d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    padding-right: 2rem;
+  }
+
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .skeleton {
+    background: linear-gradient(90deg, var(--color-cream-dark) 25%, var(--color-cream) 50%, var(--color-cream-dark) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 0.25rem;
+  }
+}
