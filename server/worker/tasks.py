@@ -68,7 +68,7 @@ async def task_stop_site(ctx: dict, site_id: str) -> None:
             await db.commit()
             await publish_site_event(site_id, "status_change", status="stopping", message="Stopping site...")
 
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
 
             site.status = SiteStatus.STOPPED
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.stopped", details=audit_details(site)))
@@ -90,7 +90,7 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
         if site is None:
             return
         try:
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d")
             site.status = SiteStatus.RUNNING
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details=audit_details(site)))
             await db.commit()
@@ -118,7 +118,7 @@ async def task_sleep_site(ctx: dict, site_id: str) -> None:
             await db.commit()
             await publish_site_event(site_id, "status_change", status="sleeping", message="Site going to sleep")
 
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
             await db.commit()
             logger.info("Idle sleep: site %s now sleeping", site.name)
         except Exception as e:
@@ -151,13 +151,13 @@ async def cron_nightly_sleep(ctx: dict) -> None:
                     continue
 
                 if site.status == SiteStatus.RUNNING and site.sleep_at_hour == current_hour:
-                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
+                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
                     site.status = SiteStatus.SLEEPING
                     await db.commit()
                     await publish_site_event(str(site_id), "status_change", status="sleeping", message="Nightly sleep")
                     logger.info("Nightly sleep: site %s now sleeping", site.name)
                 elif site.status == SiteStatus.SLEEPING and site.wake_at_hour == current_hour:
-                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
+                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d")
                     site.status = SiteStatus.RUNNING
                     await db.commit()
                     await publish_site_event(str(site_id), "status_change", status="running", message="Nightly wake")

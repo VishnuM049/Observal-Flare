@@ -247,7 +247,7 @@ async def destroy_site(
         # Stage 1: Stop application (best-effort — instance may be unreachable)
         if site.instance_id:
             try:
-                await remote.run_command(site.instance_id, "cd /opt/observal && docker compose down", timeout_seconds=60)
+                await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down", timeout_seconds=60)
             except Exception:
                 logger.warning("Could not stop application on %s (instance may be unreachable)", site.instance_id)
 
@@ -299,7 +299,7 @@ async def redeploy_site(
         # Wake if sleeping
         if site.status == SiteStatus.SLEEPING:
             await publish_site_event(str(site.id), "stage_progress", message="Waking from sleep...")
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d")
             site.status = SiteStatus.RUNNING
             await db.commit()
 
