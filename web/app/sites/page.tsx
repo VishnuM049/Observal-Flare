@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Site } from "@/lib/types";
 import { sites as sitesApi } from "@/lib/api-client";
 import { estimateDailyCost } from "@/lib/cost-estimate";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SiteTable } from "@/components/site-table";
 
 export default function SitesPage() {
@@ -12,13 +13,21 @@ export default function SitesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [bulkAction, setBulkAction] = useState<"stop" | "start" | "destroy" | null>(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
-  useEffect(() => {
+  function reload() {
     sitesApi
       .list()
       .then(setSiteList)
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    reload();
+    const interval = setInterval(reload, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   const filtered = useMemo(() => {
@@ -30,7 +39,51 @@ export default function SitesPage() {
   }, [siteList, search]);
 
   const runningCount = siteList.filter((s) => s.status === "running").length;
+  const stoppedCount = siteList.filter((s) => s.status === "stopped" || s.status === "sleeping").length;
+  const destroyableCount = siteList.filter((s) => !["destroying", "destroyed"].includes(s.status)).length;
   const totalDaily = siteList.reduce((sum, s) => sum + estimateDailyCost(s.instance_size, s.sleep_mode), 0);
+
+  const bulkConfig = {
+    stop: {
+      title: `Stop ${runningCount} running site${runningCount !== 1 ? "s" : ""}?`,
+      message: "All running sites will be stopped. Containers will be shut down but instances will remain. You can start them again later.",
+      count: runningCount,
+      targets: () => siteList.filter((s) => s.status === "running"),
+    },
+    start: {
+      title: `Start ${stoppedCount} stopped site${stoppedCount !== 1 ? "s" : ""}?`,
+      message: "All stopped and sleeping sites will be started.",
+      count: stoppedCount,
+      targets: () => siteList.filter((s) => s.status === "stopped" || s.status === "sleeping"),
+    },
+    destroy: {
+      title: `Destroy ${destroyableCount} site${destroyableCount !== 1 ? "s" : ""}?`,
+      message: "All sites will be permanently destroyed. This tears down all infrastructure including EC2 instances, DNS records, and EIPs. This action is irreversible.",
+      count: destroyableCount,
+      targets: () => siteList.filter((s) => !["destroying", "destroyed"].includes(s.status)),
+    },
+  };
+
+  async function executeBulk() {
+    if (!bulkAction) return;
+    setBulkLoading(true);
+    const failures: string[] = [];
+    const targets = bulkConfig[bulkAction].targets();
+    const fn = bulkAction === "stop" ? sitesApi.stop : bulkAction === "start" ? sitesApi.start : sitesApi.destroy;
+    for (const site of targets) {
+      try {
+        await fn(site.id);
+      } catch {
+        failures.push(site.name);
+      }
+    }
+    setBulkAction(null);
+    setBulkLoading(false);
+    reload();
+    if (failures.length > 0) {
+      setError(`Failed for: ${failures.join(", ")}`);
+    }
+  }
 
   return (
     <div>
@@ -59,7 +112,7 @@ export default function SitesPage() {
       )}
 
       {!loading && !error && siteList.length > 0 && (
-        <div className="mb-4">
+        <div className="flex items-center gap-3 mb-4">
           <input
             type="text"
             value={search}
@@ -68,6 +121,29 @@ export default function SitesPage() {
             className="input-field"
             style={{ maxWidth: "24rem" }}
           />
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              onClick={() => setBulkAction("stop")}
+              disabled={runningCount === 0 || bulkLoading}
+              className="btn-primary text-xs"
+            >
+              Stop All ({runningCount})
+            </button>
+            <button
+              onClick={() => setBulkAction("start")}
+              disabled={stoppedCount === 0 || bulkLoading}
+              className="btn-primary text-xs"
+            >
+              Start All ({stoppedCount})
+            </button>
+            <button
+              onClick={() => setBulkAction("destroy")}
+              disabled={destroyableCount === 0 || bulkLoading}
+              className="btn-primary text-xs"
+            >
+              Destroy All ({destroyableCount})
+            </button>
+          </div>
         </div>
       )}
 
@@ -89,13 +165,24 @@ export default function SitesPage() {
       {error && (
         <div className="card px-4 py-3 flex items-center justify-between" style={{ borderColor: "var(--color-danger)", backgroundColor: "var(--color-danger-light)" }}>
           <span className="text-sm" style={{ color: "var(--color-danger)" }}>{error}</span>
-          <button onClick={() => window.location.reload()} className="btn-secondary">
+          <button onClick={() => { setError(null); reload(); }} className="btn-secondary">
             Retry
           </button>
         </div>
       )}
 
       {!loading && !error && <SiteTable sites={filtered} />}
+
+      {bulkAction && (
+        <ConfirmDialog
+          open={true}
+          title={bulkConfig[bulkAction].title}
+          message={bulkConfig[bulkAction].message}
+          confirmLabel={bulkLoading ? "Processing..." : bulkAction === "destroy" ? "Destroy All" : bulkAction === "stop" ? "Stop All" : "Start All"}
+          onConfirm={executeBulk}
+          onCancel={() => setBulkAction(null)}
+        />
+      )}
     </div>
   );
 }
