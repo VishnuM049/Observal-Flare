@@ -119,6 +119,7 @@ export function SiteForm() {
                 { value: "t3.medium", label: "t3.medium — 2 vCPU, 4 GB (~$1.00/day)" },
                 { value: "t3.large", label: "t3.large — 2 vCPU, 8 GB (~$2.00/day)" },
                 { value: "t3.xlarge", label: "t3.xlarge — 4 vCPU, 16 GB (~$3.80/day)" },
+                { value: "t3.2xlarge", label: "t3.2xlarge — 8 vCPU, 32 GB (~$7.60/day)" },
               ]}
             />
           </div>

@@ -4,6 +4,7 @@ const EC2_MONTHLY: Record<string, number> = {
   "t3.medium": 30,
   "t3.large": 54,
   "t3.xlarge": 108,
+  "t3.2xlarge": 228,
 };
 
 const EBS_MONTHLY = 4;

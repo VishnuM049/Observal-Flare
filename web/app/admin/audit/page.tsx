@@ -60,9 +60,24 @@ export default function AuditLogPage() {
   }
 
   function goToPage(page: number) {
-    const p = Math.max(1, page);
-    setOffset((p - 1) * PAGE_SIZE);
-    setEditingPage(false);
+    const p = Math.max(1, Math.floor(page));
+    if (!Number.isFinite(p)) return;
+    const newOffset = (p - 1) * PAGE_SIZE;
+    if (newOffset === offset) { setEditingPage(false); return; }
+    setLoading(true);
+    auditLogs
+      .list({ action: actionFilter || undefined, limit: PAGE_SIZE, offset: newOffset })
+      .then((result) => {
+        if (result.length === 0 && newOffset > 0) {
+          setEditingPage(false);
+          return;
+        }
+        setEntries(result);
+        setOffset(newOffset);
+        setEditingPage(false);
+      })
+      .catch((err) => setError(err.message))
+      .finally(() => setLoading(false));
   }
 
   const filtered = useMemo(() => {
