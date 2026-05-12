@@ -62,7 +62,7 @@ export function SiteTable({ sites }: { sites: Site[] }) {
               </td>
               <td className="px-4 py-3 font-mono text-xs" style={{ color: "var(--color-ink-light)" }}>{site.instance_size}</td>
               <td className="px-4 py-3" style={{ color: "var(--color-ink-light)" }}>
-                {formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode))}
+                {formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode, site.sleep_at_hour, site.wake_at_hour, site.idle_timeout_minutes))}
               </td>
               <td className="px-4 py-3">
                 {site.scheduled_destroy_at ? (
@@ -87,7 +87,7 @@ export function SiteTable({ sites }: { sites: Site[] }) {
               Total ({sites.length} site{sites.length !== 1 ? "s" : ""})
             </td>
             <td className="px-4 py-3 font-medium" style={{ color: "var(--color-ink-light)" }}>
-              {formatDailyCost(sites.reduce((sum, s) => sum + estimateDailyCost(s.instance_size, s.sleep_mode), 0))}
+              {formatDailyCost(sites.reduce((sum, s) => sum + estimateDailyCost(s.instance_size, s.sleep_mode, s.sleep_at_hour, s.wake_at_hour, s.idle_timeout_minutes), 0))}
             </td>
             <td colSpan={2}></td>
           </tr>

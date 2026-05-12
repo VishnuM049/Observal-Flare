@@ -306,7 +306,7 @@ export default function SiteDetailPage() {
           )}
           <div>
             <dt className="section-label">Est. Cost</dt>
-            <dd className="mt-1 font-medium">{formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode))}</dd>
+            <dd className="mt-1 font-medium">{formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode, site.sleep_at_hour, site.wake_at_hour, site.idle_timeout_minutes))}</dd>
           </div>
           <div>
             <dt className="section-label">Created</dt>

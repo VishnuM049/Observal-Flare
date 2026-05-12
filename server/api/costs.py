@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Query
@@ -7,26 +8,24 @@ from pydantic import BaseModel
 from sqlalchemy import select
 
 from server.api.deps import DB, AdminUser
+from server.models.audit_log import AuditLog
 from server.models.site import Site, SiteStatus, SleepMode
 
 router = APIRouter(prefix="/api/costs", tags=["costs"])
 
 EC2_MONTHLY: dict[str, float] = {
-    "t3.medium": 30,
-    "t3.large": 54,
-    "t3.xlarge": 108,
-    "t3.2xlarge": 228,
+    "t3.medium": 28.80,
+    "t3.large": 57.60,
+    "t3.xlarge": 180.00,
+    "t3.2xlarge": 288.00,
 }
 
 EBS_MONTHLY = 4.0
 DATA_TRANSFER_MONTHLY = 2.0
 EIP_STOPPED_MONTHLY = 3.6
 
-SLEEP_RUNNING_FRACTION: dict[str, float] = {
-    "none": 1.0,
-    "nightly": 0.42,
-    "idle": 0.42,
-}
+RUNNING_ACTIONS = {"site.started", "site.created", "site.redeployed"}
+STOPPED_ACTIONS = {"site.stopped", "site.sleeping", "site.destroyed"}
 
 BILLABLE_STATUSES = {
     SiteStatus.RUNNING,
@@ -39,8 +38,43 @@ BILLABLE_STATUSES = {
 }
 
 
+def _hourly_rate(instance_size: str) -> float:
+    ec2 = EC2_MONTHLY.get(instance_size, EC2_MONTHLY["t3.large"])
+    return ec2 / 30 / 24
+
+
+def _fixed_daily_cost() -> float:
+    return (EBS_MONTHLY + DATA_TRANSFER_MONTHLY) / 30
+
+
+def _eip_stopped_daily() -> float:
+    return EIP_STOPPED_MONTHLY / 30
+
+
+def _running_fraction(site: Site) -> float:
+    if site.sleep_mode == SleepMode.NIGHTLY:
+        wake = site.wake_at_hour
+        sleep = site.sleep_at_hour
+        if sleep > wake:
+            hours = sleep - wake
+        elif sleep < wake:
+            hours = 24 - wake + sleep
+        else:
+            hours = 24
+        return hours / 24
+    elif site.sleep_mode == SleepMode.IDLE:
+        return 0.42
+    return 1.0
+
+
+def _daily_cost_for_site(site: Site) -> float:
+    fraction = _running_fraction(site)
+    running_cost = _hourly_rate(site.instance_size) * 24 * fraction
+    eip_cost = _eip_stopped_daily() * (1 - fraction) if fraction < 1 else 0
+    return running_cost + _fixed_daily_cost() + eip_cost
+
+
 def _projected_end_date(site: Site) -> datetime | None:
-    """Return the earliest known or inferred destruction time for a site."""
     if site.scheduled_destroy_at is not None:
         dt = site.scheduled_destroy_at
         return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
@@ -51,12 +85,61 @@ def _projected_end_date(site: Site) -> datetime | None:
     return None
 
 
-def _daily_cost(instance_size: str, sleep_mode: str) -> float:
-    ec2 = EC2_MONTHLY.get(instance_size, EC2_MONTHLY["t3.large"])
-    fraction = SLEEP_RUNNING_FRACTION.get(sleep_mode, 1.0)
-    ec2_cost = ec2 * fraction
-    eip_cost = EIP_STOPPED_MONTHLY * (1 - fraction) if fraction < 1 else 0
-    return (ec2_cost + EBS_MONTHLY + DATA_TRANSFER_MONTHLY + eip_cost) / 30
+def _ensure_utc(dt: datetime) -> datetime:
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+async def _compute_historical_cost(
+    db, site: Site, day_start: datetime, day_end: datetime, audit_logs: list[AuditLog]
+) -> float:
+    """Compute cost for a site on a given day using audit log transitions."""
+    created = _ensure_utc(site.created_at)
+    if created >= day_end:
+        return 0.0
+    if site.destroyed_at is not None:
+        destroyed = _ensure_utc(site.destroyed_at)
+        if destroyed <= day_start:
+            return 0.0
+
+    site_logs = [
+        l for l in audit_logs
+        if l.site_id == site.id and day_start <= _ensure_utc(l.created_at) < day_end
+    ]
+    site_logs.sort(key=lambda l: l.created_at)
+
+    if not site_logs:
+        return _daily_cost_for_site(site)
+
+    running_seconds = 0.0
+    is_running = True
+    segment_start = max(created, day_start)
+
+    for log in site_logs:
+        log_time = _ensure_utc(log.created_at)
+        if log.action in STOPPED_ACTIONS and is_running:
+            running_seconds += (log_time - segment_start).total_seconds()
+            is_running = False
+            segment_start = log_time
+        elif log.action in RUNNING_ACTIONS and not is_running:
+            is_running = True
+            segment_start = log_time
+
+    if is_running:
+        end = min(day_end, _ensure_utc(site.destroyed_at) if site.destroyed_at else day_end)
+        running_seconds += (end - segment_start).total_seconds()
+
+    total_seconds = (min(day_end, _ensure_utc(site.destroyed_at) if site.destroyed_at else day_end) - max(created, day_start)).total_seconds()
+    if total_seconds <= 0:
+        return 0.0
+
+    running_fraction = running_seconds / total_seconds
+    alive_days = total_seconds / 86400
+
+    running_cost = _hourly_rate(site.instance_size) * (running_seconds / 3600)
+    eip_stopped_cost = _eip_stopped_daily() * (1 - running_fraction) * alive_days
+    fixed_cost = _fixed_daily_cost() * alive_days
+
+    return running_cost + eip_stopped_cost + fixed_cost
 
 
 class DayCost(BaseModel):
@@ -84,6 +167,15 @@ async def get_cost_summary(
 
     today = date.today()
     history_start = today - timedelta(days=history_days - 1)
+    history_start_dt = datetime(history_start.year, history_start.month, history_start.day, tzinfo=timezone.utc)
+
+    log_result = await db.execute(
+        select(AuditLog)
+        .where(AuditLog.created_at >= history_start_dt)
+        .where(AuditLog.site_id.isnot(None))
+        .where(AuditLog.action.in_(list(RUNNING_ACTIONS | STOPPED_ACTIONS)))
+    )
+    all_logs = list(log_result.scalars().all())
 
     history: list[DayCost] = []
     for i in range(history_days):
@@ -94,23 +186,35 @@ async def get_cost_summary(
         total = 0.0
         count = 0
         for site in all_sites:
-            created = site.created_at.replace(tzinfo=timezone.utc) if site.created_at.tzinfo is None else site.created_at
-            if created >= day_end:
-                continue
-            if site.destroyed_at is not None:
-                destroyed = site.destroyed_at.replace(tzinfo=timezone.utc) if site.destroyed_at.tzinfo is None else site.destroyed_at
-                if destroyed <= day_start:
-                    continue
-            total += _daily_cost(site.instance_size, site.sleep_mode.value)
-            count += 1
+            cost = await _compute_historical_cost(db, site, day_start, day_end, all_logs)
+            if cost > 0:
+                total += cost
+                count += 1
 
         history.append(DayCost(date=day.isoformat(), cost=round(total, 2), site_count=count))
 
-    active_sites = [
-        s for s in all_sites
-        if s.status in BILLABLE_STATUSES
-    ]
-    today_daily = sum(_daily_cost(s.instance_size, s.sleep_mode.value) for s in active_sites)
+    active_sites = [s for s in all_sites if s.status in BILLABLE_STATUSES]
+
+    idle_fractions: dict[uuid.UUID, float] = {}
+    lookback_start = datetime(today.year, today.month, today.day, tzinfo=timezone.utc) - timedelta(days=7)
+    lookback_end = datetime(today.year, today.month, today.day, tzinfo=timezone.utc)
+    for site in active_sites:
+        if site.sleep_mode != SleepMode.IDLE:
+            continue
+        cost = await _compute_historical_cost(db, site, lookback_start, lookback_end, all_logs)
+        full_cost = _hourly_rate(site.instance_size) * 7 * 24 + _fixed_daily_cost() * 7
+        if full_cost > 0:
+            idle_fractions[site.id] = min(cost / full_cost, 1.0)
+
+    def _projected_daily_cost(site: Site) -> float:
+        if site.sleep_mode == SleepMode.IDLE and site.id in idle_fractions:
+            fraction = idle_fractions[site.id]
+            running_cost = _hourly_rate(site.instance_size) * 24 * fraction
+            eip_cost = _eip_stopped_daily() * (1 - fraction) if fraction < 1 else 0
+            return running_cost + _fixed_daily_cost() + eip_cost
+        return _daily_cost_for_site(site)
+
+    today_daily = sum(_projected_daily_cost(s) for s in active_sites)
 
     projection: list[DayCost] = []
     for i in range(1, projection_days + 1):
@@ -122,7 +226,7 @@ async def get_cost_summary(
             end = _projected_end_date(site)
             if end is not None and end <= day_start:
                 continue
-            day_cost += _daily_cost(site.instance_size, site.sleep_mode.value)
+            day_cost += _projected_daily_cost(site)
             day_count += 1
         projection.append(DayCost(
             date=day.isoformat(),

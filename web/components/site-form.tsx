@@ -116,10 +116,10 @@ export function SiteForm() {
               value={instanceSize}
               onChange={setInstanceSize}
               options={[
-                { value: "t3.medium", label: "t3.medium — 2 vCPU, 4 GB (~$1.00/day)" },
-                { value: "t3.large", label: "t3.large — 2 vCPU, 8 GB (~$2.00/day)" },
-                { value: "t3.xlarge", label: "t3.xlarge — 4 vCPU, 16 GB (~$3.80/day)" },
-                { value: "t3.2xlarge", label: "t3.2xlarge — 8 vCPU, 32 GB (~$7.60/day)" },
+                { value: "t3.medium", label: "t3.medium — 2 vCPU, 4 GB (~$0.96/day)" },
+                { value: "t3.large", label: "t3.large — 2 vCPU, 8 GB (~$1.92/day)" },
+                { value: "t3.xlarge", label: "t3.xlarge — 4 vCPU, 16 GB (~$6.00/day)" },
+                { value: "t3.2xlarge", label: "t3.2xlarge — 8 vCPU, 32 GB (~$9.60/day)" },
               ]}
             />
           </div>
@@ -207,11 +207,11 @@ export function SiteForm() {
           <div className="card px-4 py-3 text-sm">
             <span style={{ color: "var(--color-ink-muted)" }}>Estimated cost: </span>
             <span className="font-medium">
-              {formatDailyCost(estimateDailyCost(instanceSize, sleepMode))}
+              {formatDailyCost(estimateDailyCost(instanceSize, sleepMode, sleepAtHour, wakeAtHour, idleTimeoutMinutes))}
             </span>
             {ttlDays && (
               <span className="ml-2" style={{ color: "var(--color-ink-muted)" }}>
-                (~${(estimateDailyCost(instanceSize, sleepMode) * ttlDays).toFixed(2)} total for {ttlDays} day{ttlDays > 1 ? "s" : ""})
+                (~${(estimateDailyCost(instanceSize, sleepMode, sleepAtHour, wakeAtHour, idleTimeoutMinutes) * ttlDays).toFixed(2)} total for {ttlDays} day{ttlDays > 1 ? "s" : ""})
               </span>
             )}
           </div>
