@@ -1,9 +1,13 @@
 FROM node:22-alpine AS builder
 
 WORKDIR /app
-COPY package.json ./
+COPY package.json package-lock.json* ./
 RUN npm install
 COPY . .
+
+ARG NEXT_PUBLIC_WS_URL
+ARG NEXT_PUBLIC_GITHUB_CLIENT_ID
+
 RUN npm run build
 
 FROM node:22-alpine

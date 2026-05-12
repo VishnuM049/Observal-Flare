@@ -5,6 +5,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Flare — Observal Provisioning",
   description: "Create, manage, and destroy Observal instances",
+  icons: { icon: "/favicon.png" },
 };
 
 export default function RootLayout({

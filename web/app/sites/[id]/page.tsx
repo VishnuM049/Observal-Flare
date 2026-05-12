@@ -115,8 +115,7 @@ export default function SiteDetailPage() {
             : action === "start"
               ? sitesApi.start
               : sitesApi.destroy;
-      const updated = await fn(site.id);
-      setSite(updated);
+      await fn(site.id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Action failed");
     } finally {
