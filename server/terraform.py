@@ -92,7 +92,12 @@ class RealTerraform(TerraformRunner):
         workdir = self._make_workdir()
         try:
             await self._run(["init", *self._backend_config(site_name)], cwd=workdir)
-            await self._run(["destroy", "-auto-approve"], cwd=workdir)
+            await self._run([
+                "destroy", "-auto-approve",
+                f"-var=site_name={site_name}",
+                f"-var=route53_zone_id={self._zone_id}",
+                f"-var=base_domain={self._base_domain}",
+            ], cwd=workdir)
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 
