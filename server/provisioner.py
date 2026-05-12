@@ -124,8 +124,11 @@ if ! [ -d "/etc/letsencrypt/live/{site.domain}" ]; then
     certbot certonly --standalone -d {site.domain} --non-interactive --agree-tos -m admin@observal.io
 fi
 
-# Start services
+# Start services (clean volumes on first deploy to ensure consistent credentials)
 cd /opt/observal
+if ! docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml ps -q 2>/dev/null | grep -q .; then
+    docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down -v 2>/dev/null || true
+fi
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
 
 {_idle_cron_block(site)}
