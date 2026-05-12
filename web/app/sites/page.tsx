@@ -179,6 +179,7 @@ export default function SitesPage() {
           title={bulkConfig[bulkAction].title}
           message={bulkConfig[bulkAction].message}
           confirmLabel={bulkLoading ? "Processing..." : bulkAction === "destroy" ? "Destroy All" : bulkAction === "stop" ? "Stop All" : "Start All"}
+          confirmDisabled={bulkLoading}
           onConfirm={executeBulk}
           onCancel={() => setBulkAction(null)}
         />
