@@ -3,9 +3,8 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import type { Site } from "@/lib/types";
+import type { Site, SiteStatus, SleepMode } from "@/lib/types";
 import { sites as sitesApi } from "@/lib/api-client";
-import type { SleepMode } from "@/lib/types";
 import { estimateDailyCost, formatDailyCost } from "@/lib/cost-estimate";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EnvEditor } from "@/components/env-editor";
@@ -105,7 +104,7 @@ export default function SiteDetailPage() {
     };
   }, [id, loadSite]);
 
-  const pendingStatuses: Record<string, string> = {
+  const pendingStatuses: Record<string, SiteStatus> = {
     stop: "stopping",
     redeploy: "deploying",
     destroy: "destroying",
