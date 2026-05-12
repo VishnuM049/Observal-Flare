@@ -65,6 +65,19 @@ def validate_instance_size(instance_size: str) -> None:
         raise SiteError(f"Invalid instance size: '{instance_size}' — allowed: {', '.join(sorted(VALID_INSTANCE_SIZES))}")
 
 
+def audit_details(site: "Site", **extra: str | int | None) -> dict:
+    """Build a standard details dict for audit log entries."""
+    d: dict = {
+        "name": site.name,
+        "deploy_type": site.deploy_type.value,
+        "deploy_ref": site.deploy_ref,
+        "instance_size": site.instance_size,
+        "sleep_mode": site.sleep_mode.value,
+    }
+    d.update({k: v for k, v in extra.items() if v is not None})
+    return d
+
+
 def validate_env_overrides(overrides: dict[str, str]) -> None:
     for key, value in overrides.items():
         if not ENV_KEY_RE.match(key):
@@ -137,7 +150,7 @@ async def create_site(
     )
     db.add(site)
 
-    audit = AuditLog(user_id=user.id, site_id=site.id, action="site.created", details={"name": name, "deploy_type": deploy_type.value, "deploy_ref": deploy_ref, "instance_size": instance_size, "sleep_mode": sleep_mode.value, "lifetime": f"{ttl_days}d" if ttl_days else "unlimited"})
+    audit = AuditLog(user_id=user.id, site_id=site.id, action="site.created", details=audit_details(site, lifetime=f"{ttl_days}d" if ttl_days else "unlimited"))
     db.add(audit)
 
     await db.commit()

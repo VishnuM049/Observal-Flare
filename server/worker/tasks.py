@@ -14,7 +14,7 @@ from server.models.audit_log import AuditLog
 from server.models.site import Site, SiteStatus, SleepMode
 from server.notifications.email import send_site_notification
 from server.provisioner import destroy_site, provision_site, redeploy_site
-from server.services.site_service import transition_status
+from server.services.site_service import audit_details, transition_status
 from server.ssm import SSMRunner
 from server.mock import MockSSM
 from server.config import get_settings
@@ -71,7 +71,7 @@ async def task_stop_site(ctx: dict, site_id: str) -> None:
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose stop")
 
             site.status = SiteStatus.STOPPED
-            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.stopped", details={"name": site.name, "instance_size": site.instance_size}))
+            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.stopped", details=audit_details(site)))
             await db.commit()
             await publish_site_event(site_id, "status_change", status="stopped", message="Site stopped")
             logger.info("Site %s stopped", site.name)
@@ -92,7 +92,7 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
         try:
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose start")
             site.status = SiteStatus.RUNNING
-            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details={"name": site.name, "instance_size": site.instance_size}))
+            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details=audit_details(site)))
             await db.commit()
             await publish_site_event(site_id, "status_change", status="running", message="Site started")
             logger.info("Site %s started", site.name)

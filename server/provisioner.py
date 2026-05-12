@@ -20,7 +20,7 @@ from server.models.site import Site, SiteStatus, SleepMode
 from server.notifications.email import send_site_notification
 from server.services.github_service import GitHubClient, RealGitHubClient
 from server.models.audit_log import AuditLog
-from server.services.site_service import transition_status
+from server.services.site_service import audit_details, transition_status
 from server.ssm import CommandResult, RealSSM, SSMRunner
 from server.terraform import RealTerraform, TerraformRunner
 
@@ -263,7 +263,7 @@ async def destroy_site(
         site.ip_address = None
         await db.commit()
 
-        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.destroyed", details={"name": site.name, "instance_size": site.instance_size}))
+        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.destroyed", details=audit_details(site)))
         await db.commit()
         await publish_site_event(str(site.id), "status_change", status="destroyed", message="Site destroyed")
 
@@ -333,7 +333,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
             transition_status(site, SiteStatus.RUNNING)
             site.last_deployed_at = datetime.now(timezone.utc)
             site.error_message = None
-            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.redeployed", details={"name": site.name, "resolved_sha": sha, "deploy_type": site.deploy_type.value, "deploy_ref": site.deploy_ref}))
+            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.redeployed", details=audit_details(site, resolved_sha=sha)))
             await db.commit()
             await publish_site_event(str(site.id), "status_change", status="running", message="Redeploy complete")
             await send_site_notification(site, "ready")
