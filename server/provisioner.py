@@ -262,7 +262,7 @@ async def destroy_site(
         site.ip_address = None
         await db.commit()
 
-        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.destroyed", details={"name": site.name}))
+        db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.destroyed", details={"name": site.name, "instance_size": site.instance_size}))
         await db.commit()
         await publish_site_event(str(site.id), "status_change", status="destroyed", message="Site destroyed")
 
@@ -332,7 +332,7 @@ docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.
             transition_status(site, SiteStatus.RUNNING)
             site.last_deployed_at = datetime.now(timezone.utc)
             site.error_message = None
-            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.redeployed", details={"resolved_sha": sha}))
+            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.redeployed", details={"name": site.name, "resolved_sha": sha, "deploy_type": site.deploy_type.value, "deploy_ref": site.deploy_ref}))
             await db.commit()
             await publish_site_event(str(site.id), "status_change", status="running", message="Redeploy complete")
             await send_site_notification(site, "ready")

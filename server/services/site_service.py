@@ -131,7 +131,7 @@ async def create_site(
     )
     db.add(site)
 
-    audit = AuditLog(user_id=user.id, site_id=site.id, action="site.created", details={"name": name, "deploy_type": deploy_type.value, "deploy_ref": deploy_ref, "ttl_days": ttl_days})
+    audit = AuditLog(user_id=user.id, site_id=site.id, action="site.created", details={"name": name, "deploy_type": deploy_type.value, "deploy_ref": deploy_ref, "instance_size": instance_size, "sleep_mode": sleep_mode.value, "lifetime": f"{ttl_days}d" if ttl_days else "unlimited"})
     db.add(audit)
 
     await db.commit()

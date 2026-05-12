@@ -169,7 +169,7 @@ async def redeploy(site_id: uuid.UUID, db: DB, user: CurrentUser):
     if site.status not in (SiteStatus.RUNNING, SiteStatus.SLEEPING, SiteStatus.FAILED):
         raise HTTPException(status_code=400, detail=f"Cannot redeploy from status {site.status.value}")
 
-    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.redeploy_requested", details={"name": site.name}))
+    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.redeploy_requested", details={"name": site.name, "deploy_type": site.deploy_type.value, "deploy_ref": site.deploy_ref, "from_status": site.status.value}))
     pool = _get_pool()
     await pool.enqueue_job("redeploy_site", str(site.id))
     await db.commit()
@@ -185,7 +185,7 @@ async def stop_site(site_id: uuid.UUID, db: DB, user: CurrentUser):
     if site.status != SiteStatus.RUNNING:
         raise HTTPException(status_code=400, detail="Site is not running")
 
-    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.stop_requested", details={"name": site.name}))
+    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.stop_requested", details={"name": site.name, "instance_size": site.instance_size}))
     pool = _get_pool()
     await pool.enqueue_job("stop_site", str(site.id))
     await db.commit()
@@ -201,7 +201,7 @@ async def start_site(site_id: uuid.UUID, db: DB, user: CurrentUser):
     if site.status not in (SiteStatus.STOPPED, SiteStatus.SLEEPING):
         raise HTTPException(status_code=400, detail="Site is not stopped or sleeping")
 
-    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.start_requested", details={"name": site.name}))
+    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.start_requested", details={"name": site.name, "from_status": site.status.value}))
     pool = _get_pool()
     await pool.enqueue_job("start_site", str(site.id))
     await db.commit()
@@ -217,7 +217,7 @@ async def destroy(site_id: uuid.UUID, db: DB, user: CurrentUser):
     if site.status in (SiteStatus.DESTROYING, SiteStatus.DESTROYED):
         raise HTTPException(status_code=400, detail="Site is already being destroyed or destroyed")
 
-    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.destroy_requested", details={"name": site.name}))
+    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.destroy_requested", details={"name": site.name, "instance_size": site.instance_size, "from_status": site.status.value}))
     pool = _get_pool()
     await pool.enqueue_job("destroy_site", str(site.id))
     await db.commit()
