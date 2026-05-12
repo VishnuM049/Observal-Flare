@@ -30,6 +30,7 @@ export function DeploySourcePicker({
   const [validation, setValidation] = useState<{
     valid: boolean;
     sha: string;
+    message: string;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,7 +41,7 @@ export function DeploySourcePicker({
     setValidation(null);
     try {
       const result = await deploySources.validate(deployType, deployRef);
-      setValidation({ valid: result.valid, sha: result.resolved_sha });
+      setValidation({ valid: result.valid, sha: result.resolved_sha, message: result.commit_message });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Validation failed");
     } finally {
@@ -97,7 +98,7 @@ export function DeploySourcePicker({
         </div>
         {validation && (
           <p className="text-xs mt-1" style={{ color: "var(--color-accent)" }}>
-            Resolved to <span className="font-mono">{validation.sha.slice(0, 8)}</span>
+            Resolved to <span className="font-mono">{validation.sha.slice(0, 8)}</span> — {validation.message}
           </p>
         )}
         {error && <p className="text-xs mt-1" style={{ color: "var(--color-danger)" }}>{error}</p>}

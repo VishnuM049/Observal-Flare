@@ -76,7 +76,7 @@ export const sites = {
 // Deploy sources
 export const deploySources = {
   validate: (type: string, ref: string) =>
-    request<{ type: string; ref: string; resolved_sha: string; valid: boolean }>(
+    request<{ type: string; ref: string; resolved_sha: string; commit_message: string; valid: boolean }>(
       `/api/deploy-sources/validate?type=${encodeURIComponent(type)}&ref=${encodeURIComponent(ref)}`
     ),
 };

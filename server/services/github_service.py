@@ -17,6 +17,10 @@ class GitHubClient(abc.ABC):
         """Check if a GitHub user is a member of the org."""
 
     @abc.abstractmethod
+    async def get_commit_message(self, sha: str) -> str:
+        """Get the commit message for a SHA."""
+
+    @abc.abstractmethod
     async def post_pr_comment(self, pr_number: int, body: str) -> None:
         """Post or update a comment on a PR."""
 
@@ -59,6 +63,12 @@ class RealGitHubClient(GitHubClient):
                     return resp.json()["target_commitish"]
                 case _:
                     raise ValueError(f"Unknown deploy type: {deploy_type}")
+
+    async def get_commit_message(self, sha: str) -> str:
+        async with httpx.AsyncClient(headers=self._headers) as client:
+            resp = await client.get(f"{self._base}/repos/{self._owner}/{self._repo}/commits/{sha}")
+            resp.raise_for_status()
+            return resp.json()["commit"]["message"].split("\n")[0]
 
     async def check_org_membership(self, username: str) -> bool:
         async with httpx.AsyncClient(headers=self._headers) as client:

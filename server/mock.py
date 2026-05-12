@@ -42,6 +42,9 @@ class MockGitHubClient(GitHubClient):
         logger.info("[mock] resolve ref type=%s ref=%s", deploy_type, ref)
         return "abc123deadbeef0000000000000000000000cafe"
 
+    async def get_commit_message(self, sha: str) -> str:
+        return "mock commit message"
+
     async def check_org_membership(self, username: str) -> bool:
         logger.info("[mock] check org membership for %s", username)
         return True

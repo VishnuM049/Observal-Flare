@@ -254,7 +254,15 @@ async def destroy_site(
         # Stage 2: Destroy infrastructure (always runs)
         await infra.destroy(site_name=site.name)
 
-        # Stage 3: Mark destroyed
+        # Stage 3: Clean up Terraform state from S3
+        try:
+            import boto3
+            s3 = boto3.client("s3", region_name=get_settings().aws_region)
+            s3.delete_object(Bucket=get_settings().terraform_state_bucket, Key=f"sites/{site.name}/terraform.tfstate")
+        except Exception:
+            logger.warning("Could not clean up Terraform state for %s", site.name)
+
+        # Stage 4: Mark destroyed
         site.status = SiteStatus.DESTROYED
         site.destroyed_at = datetime.now(timezone.utc)
         site.instance_id = None
