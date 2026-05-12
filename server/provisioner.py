@@ -36,19 +36,17 @@ def _get_defaults() -> tuple[TerraformRunner, SSMRunner, GitHubClient]:
 
 
 def _generate_env(site: Site) -> str:
-    db_pass = secrets.token_urlsafe(24)
-    ch_pass = secrets.token_urlsafe(24)
     secret_key = secrets.token_urlsafe(32)
 
     base_vars = {
-        "DATABASE_URL": f"postgresql+asyncpg://postgres:{db_pass}@observal-db:5432/observal",
+        "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@observal-db:5432/observal",
         "SECRET_KEY": secret_key,
-        "CLICKHOUSE_URL": f"clickhouse://default:{ch_pass}@observal-clickhouse:8123/observal",
+        "CLICKHOUSE_URL": "clickhouse://default:clickhouse@observal-clickhouse:8123/observal",
         "REDIS_URL": "redis://observal-redis:6379",
         "POSTGRES_USER": "postgres",
-        "POSTGRES_PASSWORD": db_pass,
+        "POSTGRES_PASSWORD": "postgres",
         "CLICKHOUSE_USER": "default",
-        "CLICKHOUSE_PASSWORD": ch_pass,
+        "CLICKHOUSE_PASSWORD": "clickhouse",
         "DEPLOYMENT_MODE": "enterprise",
     }
     base_vars.update(site.env_overrides or {})
@@ -124,11 +122,8 @@ if ! [ -d "/etc/letsencrypt/live/{site.domain}" ]; then
     certbot certonly --standalone -d {site.domain} --non-interactive --agree-tos -m admin@observal.io
 fi
 
-# Start services (clean volumes on first deploy to ensure consistent credentials)
+# Start services
 cd /opt/observal
-if ! docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml ps -q 2>/dev/null | grep -q .; then
-    docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down -v 2>/dev/null || true
-fi
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
 
 {_idle_cron_block(site)}
