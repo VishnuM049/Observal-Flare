@@ -69,16 +69,18 @@ export default function SiteDetailPage() {
           const event = JSON.parse(e.data);
           const STABLE = ["running", "stopped", "sleeping", "destroyed", "failed"];
           if (event.type === "status_change") {
-            setSite((prev) => prev ? { ...prev, status: event.status } : prev);
+            setSite((prev: Site | null) => prev ? { ...prev, status: event.status } : prev);
             setStageMessage(event.message);
             if (STABLE.includes(event.status)) {
+              setActionLoading(null);
               setTimeout(() => setStageMessage(null), 4000);
             }
           } else if (event.type === "stage_progress") {
             setStageMessage(event.message);
           } else if (event.type === "error") {
-            setSite((prev) => prev ? { ...prev, status: "failed", error_message: event.message } : prev);
+            setSite((prev: Site | null) => prev ? { ...prev, status: "failed", error_message: event.message } : prev);
             setStageMessage(null);
+            setActionLoading(null);
           }
         } catch {
           // ignore malformed messages
@@ -103,9 +105,16 @@ export default function SiteDetailPage() {
     };
   }, [id, loadSite]);
 
+  const pendingStatuses: Record<string, string> = {
+    stop: "stopping",
+    redeploy: "deploying",
+    destroy: "destroying",
+  };
+
   async function doAction(action: string) {
     if (!site) return;
     setActionLoading(action);
+    setSite((prev: Site | null) => prev ? { ...prev, status: pendingStatuses[action] || prev.status } : prev);
     try {
       const fn =
         action === "redeploy"
@@ -118,7 +127,7 @@ export default function SiteDetailPage() {
       await fn(site.id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Action failed");
-    } finally {
+      loadSite();
       setActionLoading(null);
     }
   }
