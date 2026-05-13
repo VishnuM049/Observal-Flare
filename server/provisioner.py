@@ -344,6 +344,9 @@ if $COMPOSE logs observal-init 2>&1 | grep -q "Can't locate revision"; then
     $COMPOSE down -v
     $COMPOSE up -d --build
 fi
+
+# Restart nginx lb to pick up new container IPs
+$COMPOSE restart observal-lb 2>/dev/null || true
 """
         cmd_result = await remote.run_command(site.instance_id, update_script)
         if cmd_result.status != "success":
