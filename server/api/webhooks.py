@@ -52,8 +52,11 @@ async def _handle_push(db: DB, payload: dict) -> dict:
 
     pool = _get_pool()
     for site in sites:
-        await pool.enqueue_job("redeploy_site", str(site.id), _job_id=f"redeploy-{site.id}")
-        logger.info("Auto-update: enqueued redeploy for site %s (branch %s, sha %s)", site.name, branch, head_sha[:8])
+        result = await pool.enqueue_job("redeploy_site", str(site.id))
+        if result:
+            logger.info("Auto-update: enqueued redeploy for site %s (branch %s, sha %s)", site.name, branch, head_sha[:8])
+        else:
+            logger.warning("Auto-update: could not enqueue redeploy for site %s — job may already be queued", site.name)
 
     return {"matched": len(sites), "branch": branch, "sha": head_sha[:8]}
 
@@ -83,8 +86,11 @@ async def _handle_pull_request(db: DB, payload: dict) -> dict:
 
         pool = _get_pool()
         for site in sites:
-            await pool.enqueue_job("redeploy_site", str(site.id), _job_id=f"redeploy-{site.id}")
-            logger.info("Auto-update: enqueued redeploy for site %s (PR #%s)", site.name, pr_number)
+            result = await pool.enqueue_job("redeploy_site", str(site.id))
+            if result:
+                logger.info("Auto-update: enqueued redeploy for site %s (PR #%s)", site.name, pr_number)
+            else:
+                logger.warning("Auto-update: could not enqueue redeploy for site %s (PR #%s) — job may already be queued", site.name, pr_number)
 
         return {"action": "synchronize", "matched": len(sites), "pr": pr_number}
 
