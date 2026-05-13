@@ -330,8 +330,13 @@ git checkout {shlex.quote(sha)}
 COMPOSE="docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
 $COMPOSE up -d --build 2>&1
 
-# Wait for init container to finish before checking
-sleep 60
+# Wait for init container to finish (up to 5 min)
+for i in $(seq 1 60); do
+    if $COMPOSE ps observal-init 2>/dev/null | grep -qE "Exited|exited"; then
+        break
+    fi
+    sleep 5
+done
 
 # Check if init container failed (schema migration mismatch)
 if $COMPOSE logs observal-init 2>&1 | grep -q "Can't locate revision"; then
