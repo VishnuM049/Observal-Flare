@@ -241,7 +241,7 @@ class WorkerSettings:
         cron(cron_destroy_expired, minute=0),
         cron(cron_stale_reminders, hour=10, minute=0),
     ]
-    job_timeout = 900
+    job_timeout = 1800
     max_jobs = 4
 
     redis_settings = get_redis_settings()

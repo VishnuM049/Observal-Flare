@@ -141,14 +141,14 @@ async def _wait_for_healthy(site: Site, timeout_seconds: int = 600) -> bool:
 
     urls = [f"https://{site.domain}/readyz"]
     if site.ip_address:
-        urls.append(f"http://{site.ip_address}/readyz")
+        urls.append(f"https://{site.ip_address}/readyz")
 
     deadline = asyncio.get_running_loop().time() + timeout_seconds
-    async with httpx.AsyncClient(verify=False) as client:
+    async with httpx.AsyncClient(verify=False, follow_redirects=True) as client:
         while asyncio.get_running_loop().time() < deadline:
             for url in urls:
                 try:
-                    resp = await client.get(url, timeout=5)
+                    resp = await client.get(url, timeout=10)
                     if resp.status_code == 200:
                         return True
                 except Exception:
