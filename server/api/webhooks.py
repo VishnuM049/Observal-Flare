@@ -63,6 +63,7 @@ async def _handle_pull_request(db: DB, payload: dict) -> dict:
     action = payload.get("action", "")
     pr = payload.get("pull_request", {})
     pr_number = str(pr.get("number", ""))
+    logger.info("Pull request webhook: action=%s pr=#%s", action, pr_number)
 
     if not pr_number:
         return {"matched": 0, "reason": "no PR number"}
