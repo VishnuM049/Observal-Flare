@@ -330,13 +330,14 @@ git checkout {shlex.quote(sha)}
 COMPOSE="docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
 $COMPOSE up -d --build 2>&1
 
+# Wait for init container to finish before checking
+sleep 60
+
 # Check if init container failed (schema migration mismatch)
-if ! $COMPOSE ps observal-init 2>/dev/null | grep -q "Exited (0)"; then
-    if $COMPOSE logs observal-init 2>&1 | grep -q "Can't locate revision"; then
-        echo "=== Init failed due to migration mismatch, wiping data and retrying ==="
-        $COMPOSE down -v
-        $COMPOSE up -d --build
-    fi
+if $COMPOSE logs observal-init 2>&1 | grep -q "Can't locate revision"; then
+    echo "=== Init failed due to migration mismatch, wiping data and retrying ==="
+    $COMPOSE down -v
+    $COMPOSE up -d --build
 fi
 """
         cmd_result = await remote.run_command(site.instance_id, update_script)
