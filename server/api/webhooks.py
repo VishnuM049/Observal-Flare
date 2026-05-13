@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 logger = logging.getLogger(__name__)
 
 AUTO_UPDATE_STATUSES = {SiteStatus.RUNNING, SiteStatus.SLEEPING}
+DEPLOYING_STATUSES = {SiteStatus.PROVISIONING, SiteStatus.DEPLOYING}
 TEARDOWN_STATUSES = {SiteStatus.RUNNING, SiteStatus.STOPPED, SiteStatus.SLEEPING}
 
 
@@ -44,21 +45,25 @@ async def _handle_push(db: DB, payload: dict) -> dict:
             Site.deploy_type == DeployType.BRANCH,
             Site.deploy_ref == branch,
             Site.auto_update.is_(True),
-            Site.status.in_([s.value for s in AUTO_UPDATE_STATUSES]),
+            Site.status.in_([s.value for s in AUTO_UPDATE_STATUSES | DEPLOYING_STATUSES]),
         )
         .with_for_update()
     )
     sites = list(result.scalars().all())
 
+    matched = 0
     pool = _get_pool()
     for site in sites:
-        result = await pool.enqueue_job("redeploy_site", str(site.id))
-        if result:
-            logger.info("Auto-update: enqueued redeploy for site %s (branch %s, sha %s)", site.name, branch, head_sha[:8])
+        if site.status in DEPLOYING_STATUSES:
+            site.redeploy_pending = True
+            await db.commit()
+            logger.info("Auto-update: marked pending redeploy for site %s (branch %s, currently %s)", site.name, branch, site.status.value)
         else:
-            logger.warning("Auto-update: could not enqueue redeploy for site %s — job may already be queued", site.name)
+            await pool.enqueue_job("redeploy_site", str(site.id))
+            logger.info("Auto-update: enqueued redeploy for site %s (branch %s, sha %s)", site.name, branch, head_sha[:8])
+        matched += 1
 
-    return {"matched": len(sites), "branch": branch, "sha": head_sha[:8]}
+    return {"matched": matched, "branch": branch, "sha": head_sha[:8]}
 
 
 async def _handle_pull_request(db: DB, payload: dict) -> dict:
@@ -78,21 +83,25 @@ async def _handle_pull_request(db: DB, payload: dict) -> dict:
                 Site.deploy_type == DeployType.PR,
                 Site.deploy_ref == pr_number,
                 Site.auto_update.is_(True),
-                Site.status.in_([s.value for s in AUTO_UPDATE_STATUSES]),
+                Site.status.in_([s.value for s in AUTO_UPDATE_STATUSES | DEPLOYING_STATUSES]),
             )
             .with_for_update()
         )
         sites = list(result.scalars().all())
 
+        matched = 0
         pool = _get_pool()
         for site in sites:
-            result = await pool.enqueue_job("redeploy_site", str(site.id))
-            if result:
-                logger.info("Auto-update: enqueued redeploy for site %s (PR #%s)", site.name, pr_number)
+            if site.status in DEPLOYING_STATUSES:
+                site.redeploy_pending = True
+                await db.commit()
+                logger.info("Auto-update: marked pending redeploy for site %s (PR #%s, currently %s)", site.name, pr_number, site.status.value)
             else:
-                logger.warning("Auto-update: could not enqueue redeploy for site %s (PR #%s) — job may already be queued", site.name, pr_number)
+                await pool.enqueue_job("redeploy_site", str(site.id))
+                logger.info("Auto-update: enqueued redeploy for site %s (PR #%s)", site.name, pr_number)
+            matched += 1
 
-        return {"action": "synchronize", "matched": len(sites), "pr": pr_number}
+        return {"action": "synchronize", "matched": matched, "pr": pr_number}
 
     elif action == "closed":
         result = await db.execute(

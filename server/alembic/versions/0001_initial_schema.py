@@ -69,6 +69,8 @@ def upgrade() -> None:
         # Environment configuration
         sa.Column("env_overrides", JSON, nullable=False, server_default="{}"),
         sa.Column("instance_size", sa.String(20), nullable=False, server_default="t3.large"),
+        # Redeploy queue
+        sa.Column("redeploy_pending", sa.Boolean, nullable=False, server_default=sa.text("false")),
         # Idle callback auth
         sa.Column("idle_token", sa.String(64), nullable=True),
         # AWS resources

@@ -73,6 +73,9 @@ class Site(Base):
     env_overrides: Mapped[dict] = mapped_column(JSON, default=dict)
     instance_size: Mapped[str] = mapped_column(String(20), default="t3.large")
 
+    # Redeploy queue (webhook arrived during active deploy)
+    redeploy_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+
     # Idle callback auth
     idle_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
 

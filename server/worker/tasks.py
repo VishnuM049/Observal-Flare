@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from arq import cron, func
+from arq import create_pool, cron, func
 from sqlalchemy import select
 
 from server.database import async_session
@@ -55,6 +55,15 @@ async def task_redeploy_site(ctx: dict, site_id: str) -> None:
             logger.error("Site %s not found for redeploy", site_id)
             return
         await redeploy_site(db, site)
+
+        await db.refresh(site)
+        if site.redeploy_pending:
+            site.redeploy_pending = False
+            await db.commit()
+            logger.info("Pending redeploy detected for site %s, re-enqueuing", site.name)
+            pool = await create_pool(get_redis_settings())
+            await pool.enqueue_job("redeploy_site", site_id)
+            await pool.aclose()
 
 
 async def task_stop_site(ctx: dict, site_id: str) -> None:
