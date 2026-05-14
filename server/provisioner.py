@@ -312,6 +312,9 @@ async def redeploy_site(
         # Wake if sleeping
         if site.status == SiteStatus.SLEEPING:
             await publish_site_event(str(site.id), "stage_progress", message="Waking from sleep...")
+            if not get_settings().is_local:
+                from server.ec2 import start_ec2_instance
+                await start_ec2_instance(site.instance_id)
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             site.status = SiteStatus.RUNNING
             await db.commit()
