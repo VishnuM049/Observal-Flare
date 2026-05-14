@@ -393,7 +393,7 @@ export default function SiteDetailPage() {
 
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Sleep Mode</label>
+              <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Sleep Mode <span className="text-xs">(next redeploy)</span></label>
               <SelectField
                 value={editSleepMode}
                 onChange={(v) => setEditSleepMode(v as SleepMode)}
@@ -432,7 +432,7 @@ export default function SiteDetailPage() {
             )}
             {editSleepMode === "idle" && (
               <div>
-                <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Idle Timeout</label>
+                <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Idle Timeout <span className="text-xs">(next redeploy)</span></label>
                 <SelectField
                   value={editIdleTimeout.toString()}
                   onChange={(v) => setEditIdleTimeout(Number(v))}
@@ -481,7 +481,7 @@ export default function SiteDetailPage() {
           <div>
             <label className="block mb-1 text-sm" style={{ color: "var(--color-ink-muted)" }}>
               Environment Variables
-              <span className="ml-1">(applied on next redeploy)</span>
+              <span className="text-xs ml-1">(next redeploy)</span>
             </label>
             <EnvEditor value={editEnvOverrides} onChange={setEditEnvOverrides} />
           </div>
