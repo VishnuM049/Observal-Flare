@@ -79,7 +79,7 @@ if [ "$RECENT" -eq 0 ]; then
 fi
 IDLEOF
 chmod +x /opt/observal/idle-check.sh
-(crontab -l 2>/dev/null | grep -v idle-check; echo "*/30 * * * * /opt/observal/idle-check.sh") | crontab -
+(crontab -l 2>/dev/null | grep -v idle-check; echo "*/15 * * * * /opt/observal/idle-check.sh") | crontab -
 """
 
 
