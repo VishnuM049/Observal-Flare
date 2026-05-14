@@ -123,8 +123,9 @@ if ! [ -d "/etc/letsencrypt/live/{site.domain}" ]; then
 fi
 
 # Start services (--build ensures we use the checked-out source, not stale registry images)
+# || true: compose may exit non-zero if init container exits (expected); Flare health check verifies the site
 cd /opt/observal
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build
+docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build || true
 
 {_idle_cron_block(site)}
 echo "=== Deploy complete ==="
