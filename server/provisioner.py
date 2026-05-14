@@ -69,12 +69,14 @@ THRESHOLD={threshold_seconds}
 AUTH="Authorization: Bearer {site.idle_token}"
 COMPOSE="docker compose -f /opt/observal/docker/docker-compose.yml -f /opt/observal/docker/docker-compose.production.yml"
 
-# Count recent HTTP requests within the idle threshold
-RECENT=$($COMPOSE logs observal-lb --since "$((THRESHOLD))s" 2>/dev/null | grep -c "HTTP/" || echo "0")
+# Get recent lb logs within the idle threshold
+LOGS=$($COMPOSE logs observal-lb --since "$((THRESHOLD))s" 2>/dev/null || true)
+RECENT=$(echo "$LOGS" | grep -c "HTTP/" || echo "0")
 
 if [ "$RECENT" -gt 0 ]; then
-    # Site is active — report heartbeat
-    curl -sf -X POST -H "$AUTH" -H "Content-Type: application/json" -d '{{"last_request_ts": '$( date +%s )'}}' {heartbeat_url} || true
+    # Extract timestamp of the most recent request
+    LAST_TS=$(echo "$LOGS" | grep "HTTP/" | tail -1 | grep -oP '\\[\\K[^]]+' | xargs -I{{}} date -d '{{}}' +%s 2>/dev/null || date +%s)
+    curl -sf -X POST -H "$AUTH" -H "Content-Type: application/json" -d '{{"last_request_ts": '"$LAST_TS"'}}' {heartbeat_url} || true
 else
     # Site is idle — trigger sleep
     curl -sf -X POST -H "$AUTH" {idle_url} || true
