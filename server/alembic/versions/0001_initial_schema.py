@@ -80,6 +80,8 @@ def upgrade() -> None:
         # Stale site reminders
         sa.Column("ttl_days", sa.Integer, nullable=True),
         sa.Column("reminder_sent_at", sa.DateTime(timezone=True), nullable=True),
+        # Activity tracking
+        sa.Column("last_activity_at", sa.DateTime(timezone=True), nullable=True),
         # Lifecycle
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),

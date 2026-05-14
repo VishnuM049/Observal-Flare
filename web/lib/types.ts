@@ -48,6 +48,7 @@ export interface Site {
   scheduled_destroy_at: string | null;
   created_at: string;
   updated_at: string;
+  last_activity_at: string | null;
   last_deployed_at: string | null;
   destroyed_at: string | null;
 }

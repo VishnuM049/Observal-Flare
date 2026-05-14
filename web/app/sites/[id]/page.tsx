@@ -39,6 +39,30 @@ function TtlCountdown({ createdAt, ttlDays, scheduledDestroyAt }: { createdAt: s
   return <span>{d}d {h.toString().padStart(2, "0")}:{m.toString().padStart(2, "0")}:{s.toString().padStart(2, "0")}</span>;
 }
 
+function LastActivityDisplay({ activityAt, idleTimeout }: { activityAt: string; idleTimeout: number }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const lastTime = new Date(activityAt).getTime();
+  const elapsed = now - lastTime;
+  const timeoutMs = idleTimeout * 60000;
+  const remaining = Math.max(0, timeoutMs - elapsed);
+
+  const ago = Math.floor(elapsed / 60000);
+  const agoText = ago < 1 ? "just now" : ago < 60 ? `${ago}m ago` : `${Math.floor(ago / 60)}h ${ago % 60}m ago`;
+
+  if (remaining === 0) {
+    return <span style={{ color: "var(--color-warning)" }}>Idle — last visited {agoText}</span>;
+  }
+
+  const m = Math.floor(remaining / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  return <span>Last visited {agoText} — sleeps in {m}:{s.toString().padStart(2, "0")}</span>;
+}
+
 export default function SiteDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -318,6 +342,14 @@ export default function SiteDetailPage() {
               )}
             </dd>
           </div>
+          {site.sleep_mode === "idle" && (
+            <div>
+              <dt className="section-label">Last Activity</dt>
+              <dd className="mt-1">
+                {site.last_activity_at ? <LastActivityDisplay activityAt={site.last_activity_at} idleTimeout={site.idle_timeout_minutes} /> : "Awaiting first check..."}
+              </dd>
+            </div>
+          )}
           <div>
             <dt className="section-label">Time-to-Live</dt>
             <dd className="mt-1">

@@ -58,24 +58,26 @@ def _idle_cron_block(site: Site) -> str:
     if site.sleep_mode != SleepMode.IDLE:
         return ""
     settings = get_settings()
-    callback_url = f"{settings.flare_base_url}/api/sites/{site.id}/idle"
+    idle_url = f"{settings.flare_base_url}/api/sites/{site.id}/idle"
+    heartbeat_url = f"{settings.flare_base_url}/api/sites/{site.id}/heartbeat"
     threshold_seconds = site.idle_timeout_minutes * 60
     return f"""
-# Idle detection: check docker lb logs for recent requests, sleep after {site.idle_timeout_minutes}min idle
+# Idle detection + heartbeat: check docker lb logs, report activity, sleep after {site.idle_timeout_minutes}min idle
 cat > /opt/observal/idle-check.sh << 'IDLEOF'
 #!/bin/bash
 THRESHOLD={threshold_seconds}
+AUTH="Authorization: Bearer {site.idle_token}"
 COMPOSE="docker compose -f /opt/observal/docker/docker-compose.yml -f /opt/observal/docker/docker-compose.production.yml"
 
-# Get the Docker timestamp of the last lb log line
-LAST_LINE=$($COMPOSE logs observal-lb --tail=1 2>/dev/null | head -1)
-if [ -z "$LAST_LINE" ]; then exit 0; fi
+# Count recent HTTP requests within the idle threshold
+RECENT=$($COMPOSE logs observal-lb --since "$((THRESHOLD))s" 2>/dev/null | grep -c "HTTP/" || echo "0")
 
-# Docker log format: "observal-lb-1  | 172.18.0.1 - - [13/May/2026:04:00:00 +0000] ..."
-# Use --since to check if any new logs appeared in the threshold window
-RECENT=$($COMPOSE logs observal-lb --since "$((THRESHOLD))s" 2>/dev/null | grep -c "HTTP/")
-if [ "$RECENT" -eq 0 ]; then
-    curl -sf -X POST -H "Authorization: Bearer {site.idle_token}" {callback_url} || true
+if [ "$RECENT" -gt 0 ]; then
+    # Site is active — report heartbeat
+    curl -sf -X POST -H "$AUTH" -H "Content-Type: application/json" -d '{{"last_request_ts": '$( date +%s )'}}' {heartbeat_url} || true
+else
+    # Site is idle — trigger sleep
+    curl -sf -X POST -H "$AUTH" {idle_url} || true
 fi
 IDLEOF
 chmod +x /opt/observal/idle-check.sh

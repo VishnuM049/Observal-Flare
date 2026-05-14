@@ -83,6 +83,7 @@ class SiteResponse(BaseModel):
     scheduled_destroy_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    last_activity_at: datetime | None
     last_deployed_at: datetime | None
     destroyed_at: datetime | None
 
@@ -254,6 +255,23 @@ async def report_idle(site_id: uuid.UUID, db: DB, authorization: str | None = He
         return
     pool = _get_pool()
     await pool.enqueue_job("sleep_site", str(site.id))
+
+
+@router.post("/{site_id}/heartbeat", status_code=204)
+async def report_heartbeat(site_id: uuid.UUID, body: dict, db: DB, authorization: str | None = Header(None)):
+    """Called by the instance every 15 min with last request timestamp."""
+    from datetime import datetime, timezone
+    site = await db.get(Site, site_id)
+    if site is None:
+        raise HTTPException(status_code=404)
+    if not site.idle_token or authorization != f"Bearer {site.idle_token}":
+        raise HTTPException(status_code=401, detail="Invalid token")
+    ts = body.get("last_request_ts")
+    if ts:
+        site.last_activity_at = datetime.fromtimestamp(ts, tz=timezone.utc)
+    else:
+        site.last_activity_at = datetime.now(timezone.utc)
+    await db.commit()
 
 
 @router.post("/{site_id}/unlock", status_code=204)
