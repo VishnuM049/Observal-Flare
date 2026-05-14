@@ -11,6 +11,34 @@ import { EnvEditor } from "@/components/env-editor";
 import { SelectField } from "@/components/select-field";
 import { StatusBadge } from "@/components/status-badge";
 
+function TtlCountdown({ createdAt, ttlDays, scheduledDestroyAt }: { createdAt: string; ttlDays: number; scheduledDestroyAt: string | null }) {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  if (scheduledDestroyAt) {
+    const destroyTime = new Date(scheduledDestroyAt).getTime();
+    const remaining = Math.max(0, destroyTime - now);
+    if (remaining === 0) return <span style={{ color: "var(--color-danger)" }}>Destruction pending</span>;
+    const d = Math.floor(remaining / 86400000);
+    const h = Math.floor((remaining % 86400000) / 3600000);
+    const m = Math.floor((remaining % 3600000) / 60000);
+    const s = Math.floor((remaining % 60000) / 1000);
+    return <span style={{ color: "var(--color-danger)" }}>Destroys in {d}d {h.toString().padStart(2, "0")}:{m.toString().padStart(2, "0")}:{s.toString().padStart(2, "0")}</span>;
+  }
+
+  const expiresAt = new Date(createdAt).getTime() + ttlDays * 86400000;
+  const remaining = Math.max(0, expiresAt - now);
+  if (remaining === 0) return <span style={{ color: "var(--color-warning)" }}>TTL expired — awaiting cleanup</span>;
+  const d = Math.floor(remaining / 86400000);
+  const h = Math.floor((remaining % 86400000) / 3600000);
+  const m = Math.floor((remaining % 3600000) / 60000);
+  const s = Math.floor((remaining % 60000) / 1000);
+  return <span>{d}d {h.toString().padStart(2, "0")}:{m.toString().padStart(2, "0")}:{s.toString().padStart(2, "0")}</span>;
+}
+
 export default function SiteDetailPage() {
   const params = useParams();
   const id = params.id as string;
@@ -292,14 +320,10 @@ export default function SiteDetailPage() {
           </div>
           <div>
             <dt className="section-label">Time-to-Live</dt>
-            <dd className="mt-1">{site.ttl_days ? `${site.ttl_days} day${site.ttl_days > 1 ? "s" : ""}` : "No limit"}</dd>
+            <dd className="mt-1">
+              {site.ttl_days ? <TtlCountdown createdAt={site.created_at} ttlDays={site.ttl_days} scheduledDestroyAt={site.scheduled_destroy_at} /> : "No limit"}
+            </dd>
           </div>
-          {site.scheduled_destroy_at && (
-            <div>
-              <dt className="section-label">Scheduled Destruction</dt>
-              <dd className="mt-1" style={{ color: "var(--color-danger)" }}>{new Date(site.scheduled_destroy_at).toLocaleString()}</dd>
-            </div>
-          )}
           <div>
             <dt className="section-label">Est. Cost</dt>
             <dd className="mt-1 font-medium">{formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode, site.sleep_at_hour, site.wake_at_hour, site.idle_timeout_minutes))}</dd>
