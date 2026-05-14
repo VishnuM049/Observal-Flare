@@ -81,7 +81,9 @@ else
 fi
 IDLEOF
 chmod +x /opt/observal/idle-check.sh
-( (crontab -l 2>/dev/null || true) | grep -v idle-check; echo "*/15 * * * * /opt/observal/idle-check.sh") | crontab -
+EXISTING=$( (crontab -l 2>/dev/null || true) | (grep -v idle-check || true) )
+echo "$EXISTING
+*/15 * * * * /opt/observal/idle-check.sh" | crontab -
 """
 
 
@@ -132,6 +134,9 @@ fi
 # || true: compose may exit non-zero if init container exits (expected); Flare health check verifies the site
 cd /opt/observal
 docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build || true
+
+# Disable strict mode for auxiliary setup (cron, etc.) — failures here shouldn't kill the deploy
+set +euo pipefail
 
 {_idle_cron_block(site)}
 echo "=== Deploy complete ==="
