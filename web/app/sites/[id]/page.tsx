@@ -346,7 +346,11 @@ export default function SiteDetailPage() {
             <div>
               <dt className="section-label">Last Activity</dt>
               <dd className="mt-1">
-                {site.last_activity_at ? <LastActivityDisplay activityAt={site.last_activity_at} idleTimeout={site.idle_timeout_minutes} /> : "Awaiting first check..."}
+                {site.status !== "running"
+                  ? <span style={{ color: "var(--color-ink-muted)" }}>Site is {site.status}</span>
+                  : site.last_activity_at
+                    ? <LastActivityDisplay activityAt={site.last_activity_at} idleTimeout={site.idle_timeout_minutes} />
+                    : "Awaiting first check..."}
               </dd>
             </div>
           )}

@@ -107,6 +107,7 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
                 await start_ec2_instance(site.instance_id)
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             site.status = SiteStatus.RUNNING
+            site.last_activity_at = datetime.now(timezone.utc)
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details=audit_details(site)))
             await db.commit()
             await publish_site_event(site_id, "status_change", status="running", message="Site started")
