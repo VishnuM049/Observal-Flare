@@ -375,6 +375,16 @@ $COMPOSE restart observal-lb 2>/dev/null || true
         healthy = await _wait_for_healthy(site)
 
         if healthy:
+            # Update idle cron config to match current DB settings
+            try:
+                cron_script = _idle_cron_block(site)
+                if cron_script:
+                    await remote.run_command(site.instance_id, f"#!/bin/bash\n{cron_script}")
+                elif site.sleep_mode != SleepMode.IDLE:
+                    await remote.run_command(site.instance_id, '( (crontab -l 2>/dev/null || true) | (grep -v idle-check || true) ) | crontab - ; rm -f /opt/observal/idle-check.sh')
+            except Exception:
+                logger.warning("Failed to update idle cron on %s (site is healthy, cron may be stale)", site.name)
+
             transition_status(site, SiteStatus.RUNNING)
             site.last_deployed_at = datetime.now(timezone.utc)
             site.error_message = None
