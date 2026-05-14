@@ -61,16 +61,20 @@ def _idle_cron_block(site: Site) -> str:
     callback_url = f"{settings.flare_base_url}/api/sites/{site.id}/idle"
     threshold_seconds = site.idle_timeout_minutes * 60
     return f"""
-# Idle detection: check nginx access log, sleep after {site.idle_timeout_minutes}min idle
+# Idle detection: check docker lb logs for recent requests, sleep after {site.idle_timeout_minutes}min idle
 cat > /opt/observal/idle-check.sh << 'IDLEOF'
 #!/bin/bash
-LOG="/var/log/nginx/access.log"
 THRESHOLD={threshold_seconds}
-if [ ! -f "$LOG" ]; then exit 0; fi
-LAST_MOD=$(stat -c %Y "$LOG" 2>/dev/null || stat -f %m "$LOG" 2>/dev/null)
-NOW=$(date +%s)
-AGE=$(( NOW - LAST_MOD ))
-if [ "$AGE" -ge "$THRESHOLD" ]; then
+COMPOSE="docker compose -f /opt/observal/docker/docker-compose.yml -f /opt/observal/docker/docker-compose.production.yml"
+
+# Get the Docker timestamp of the last lb log line
+LAST_LINE=$($COMPOSE logs observal-lb --tail=1 2>/dev/null | head -1)
+if [ -z "$LAST_LINE" ]; then exit 0; fi
+
+# Docker log format: "observal-lb-1  | 172.18.0.1 - - [13/May/2026:04:00:00 +0000] ..."
+# Use --since to check if any new logs appeared in the threshold window
+RECENT=$($COMPOSE logs observal-lb --since "$((THRESHOLD))s" 2>/dev/null | grep -c "HTTP/")
+if [ "$RECENT" -eq 0 ]; then
     curl -sf -X POST -H "Authorization: Bearer {site.idle_token}" {callback_url} || true
 fi
 IDLEOF
