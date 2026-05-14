@@ -81,7 +81,7 @@ else
 fi
 IDLEOF
 chmod +x /opt/observal/idle-check.sh
-(crontab -l 2>/dev/null | grep -v idle-check; echo "*/15 * * * * /opt/observal/idle-check.sh") | crontab -
+( (crontab -l 2>/dev/null || true) | grep -v idle-check; echo "*/15 * * * * /opt/observal/idle-check.sh") | crontab -
 """
 
 
@@ -200,13 +200,15 @@ async def provision_site(
         script = _deploy_script(site, sha)
         cmd_result: CommandResult = await remote.run_command(result.instance_id, script)
         if cmd_result.status != "success":
-            raise RuntimeError(f"Deploy script failed: {cmd_result.output[:500]}")
+            logger.warning("Deploy script exited non-zero for %s: %s", site.name, cmd_result.output[:500])
+            site.provision_log = cmd_result.output[:2000]
 
-        # Stage 4: Wait for healthy
+        # Stage 4: Wait for healthy (always runs — script exit code is unreliable)
         await publish_site_event(str(site.id), "stage_progress", message="Waiting for health check...")
         healthy = await _wait_for_healthy(site)
         if not healthy:
-            raise RuntimeError(f"Site {site.domain} did not become healthy within timeout")
+            script_hint = f" (deploy script also failed: {cmd_result.output[:200]})" if cmd_result.status != "success" else ""
+            raise RuntimeError(f"Site {site.domain} did not become healthy within timeout{script_hint}")
 
         # Stage 5: Success
         transition_status(site, SiteStatus.RUNNING)
