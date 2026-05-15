@@ -342,12 +342,17 @@ async def redeploy_site(
         await publish_site_event(str(site.id), "status_change", status="deploying", message="Redeploying...")
 
         # Deploy updated code — retry with volume wipe if init fails (schema migration mismatch)
+        env_content = _generate_env(site)
         update_script = f"""#!/bin/bash
 set -euo pipefail
 exec > /var/log/flare-deploy.log 2>&1
 cd /opt/observal
 git fetch origin {shlex.quote(sha)}
 git checkout {shlex.quote(sha)}
+
+cat > /opt/observal/.env << 'ENVEOF'
+{env_content}
+ENVEOF
 
 COMPOSE="docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
 $COMPOSE up -d --build 2>&1
