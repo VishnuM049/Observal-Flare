@@ -321,15 +321,17 @@ async def redeploy_site(
     github = github or default_github
 
     try:
-        # Wake if sleeping
-        if site.status == SiteStatus.SLEEPING:
-            await publish_site_event(str(site.id), "stage_progress", message="Waking from sleep...")
-            if not get_settings().is_local:
-                from server.ec2 import start_ec2_instance
+        # Ensure EC2 is running (handles sleeping, stopped, failed, or mid-transition states)
+        if not get_settings().is_local and site.instance_id:
+            from server.ec2 import start_ec2_instance, _get_client, _get_instance_state
+            ec2_state = await _get_instance_state(_get_client(), site.instance_id)
+            if ec2_state != "running":
+                await publish_site_event(str(site.id), "stage_progress", message="Starting EC2 instance...")
                 await start_ec2_instance(site.instance_id)
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
-            site.status = SiteStatus.RUNNING
-            await db.commit()
+            if site.status in (SiteStatus.SLEEPING, SiteStatus.STOPPED):
+                site.status = SiteStatus.RUNNING
+                await db.commit()
 
         # Resolve new SHA
         sha = await github.resolve_ref(site.deploy_type.value, site.deploy_ref)
