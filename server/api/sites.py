@@ -10,7 +10,7 @@ from pydantic import BaseModel, EmailStr, Field
 from server.api.deps import DB, AdminUser, CurrentUser
 from server.models.audit_log import AuditLog
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
-from server.services.site_service import SiteError, audit_details, create_site, get_site, get_site_for_update, list_sites, validate_env_overrides
+from server.services.site_service import SiteError, audit_details, create_site, get_site, get_site_for_update, list_sites, validate_deploy_ref, validate_env_overrides
 
 router = APIRouter(prefix="/api/sites", tags=["sites"])
 
@@ -48,6 +48,7 @@ class SiteCreateRequest(BaseModel):
 
 
 class SiteUpdateRequest(BaseModel):
+    deploy_ref: str | None = None
     env_overrides: dict[str, str] | None = None
     auto_update: bool | None = None
     auto_wipe_on_failure: bool | None = None
@@ -144,6 +145,12 @@ async def update_site_config(site_id: uuid.UUID, body: SiteUpdateRequest, db: DB
     except SiteError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
+    if body.deploy_ref is not None:
+        try:
+            validate_deploy_ref(body.deploy_ref)
+        except SiteError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        site.deploy_ref = body.deploy_ref
     if body.env_overrides is not None:
         try:
             validate_env_overrides(body.env_overrides)

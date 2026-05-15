@@ -81,6 +81,7 @@ export default function SiteDetailPage() {
   const [editWakeAtHour, setEditWakeAtHour] = useState(7);
   const [editTtlDays, setEditTtlDays] = useState<number | null>(null);
   const [editRequestorEmail, setEditRequestorEmail] = useState("");
+  const [editDeployRef, setEditDeployRef] = useState("");
   const [editEnvOverrides, setEditEnvOverrides] = useState<Record<string, string>>({});
   const [showDestroyConfirm, setShowDestroyConfirm] = useState(false);
 
@@ -206,6 +207,7 @@ export default function SiteDetailPage() {
     setEditAutoWipe(site.auto_wipe_on_failure);
     setEditTtlDays(site.ttl_days);
     setEditRequestorEmail(site.requestor_email);
+    setEditDeployRef(site.deploy_ref);
     setEditEnvOverrides({ ...site.env_overrides });
     setEditing(true);
   }
@@ -215,6 +217,7 @@ export default function SiteDetailPage() {
     setActionLoading("save");
     try {
       const updated = await sitesApi.update(site.id, {
+        deploy_ref: editDeployRef,
         sleep_mode: editSleepMode,
         idle_timeout_minutes: editSleepMode === "idle" ? editIdleTimeout : undefined,
         sleep_at_hour: editSleepMode === "nightly" ? editSleepAtHour : undefined,
@@ -396,6 +399,12 @@ export default function SiteDetailPage() {
           <h2 className="section-label">Edit Settings</h2>
 
           <div className="grid grid-cols-2 gap-4 text-sm">
+            {site.deploy_type === "commit" && (
+              <div>
+                <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Commit SHA <span className="text-xs">(next redeploy)</span></label>
+                <input type="text" value={editDeployRef} onChange={(e) => setEditDeployRef(e.target.value)} className="input-field font-mono" placeholder="e.g. abc1234" />
+              </div>
+            )}
             <div>
               <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Sleep Mode <span className="text-xs">(next redeploy)</span></label>
               <SelectField
