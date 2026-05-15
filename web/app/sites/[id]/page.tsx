@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { Site, SiteStatus, SleepMode } from "@/lib/types";
-import { sites as sitesApi } from "@/lib/api-client";
+import { sites as sitesApi, deploySources } from "@/lib/api-client";
 import { estimateDailyCost, formatDailyCost } from "@/lib/cost-estimate";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { EnvEditor } from "@/components/env-editor";
@@ -82,6 +82,9 @@ export default function SiteDetailPage() {
   const [editTtlDays, setEditTtlDays] = useState<number | null>(null);
   const [editRequestorEmail, setEditRequestorEmail] = useState("");
   const [editDeployRef, setEditDeployRef] = useState("");
+  const [refValidating, setRefValidating] = useState(false);
+  const [refValidation, setRefValidation] = useState<{ sha: string; message: string } | null>(null);
+  const [refError, setRefError] = useState<string | null>(null);
   const [editEnvOverrides, setEditEnvOverrides] = useState<Record<string, string>>({});
   const [showDestroyConfirm, setShowDestroyConfirm] = useState(false);
 
@@ -402,7 +405,28 @@ export default function SiteDetailPage() {
             {site.deploy_type === "commit" && (
               <div>
                 <label className="block mb-1" style={{ color: "var(--color-ink-muted)" }}>Commit SHA <span className="text-xs">(next redeploy)</span></label>
-                <input type="text" value={editDeployRef} onChange={(e) => setEditDeployRef(e.target.value)} className="input-field font-mono" placeholder="e.g. abc1234" />
+                <div className="flex gap-2">
+                  <input type="text" value={editDeployRef} onChange={(e) => { setEditDeployRef(e.target.value); setRefValidation(null); setRefError(null); }} className="input-field font-mono flex-1" placeholder="e.g. abc1234" />
+                  <button type="button" disabled={refValidating || !editDeployRef.trim()} className="btn-primary" onClick={async () => {
+                    setRefValidating(true);
+                    setRefError(null);
+                    setRefValidation(null);
+                    try {
+                      const result = await deploySources.validate(site.deploy_type, editDeployRef);
+                      setRefValidation({ sha: result.resolved_sha, message: result.commit_message });
+                    } catch (err: unknown) {
+                      setRefError(err instanceof Error ? err.message : "Validation failed");
+                    } finally {
+                      setRefValidating(false);
+                    }
+                  }}>{refValidating ? "..." : "Validate"}</button>
+                </div>
+                {refValidation && (
+                  <p className="text-xs mt-1" style={{ color: "var(--color-accent)" }}>
+                    Resolved to <span className="font-mono">{refValidation.sha.slice(0, 8)}</span> — {refValidation.message}
+                  </p>
+                )}
+                {refError && <p className="text-xs mt-1" style={{ color: "var(--color-danger)" }}>{refError}</p>}
               </div>
             )}
             <div>

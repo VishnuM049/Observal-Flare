@@ -35,10 +35,10 @@ def _get_defaults() -> tuple[TerraformRunner, SSMRunner, GitHubClient]:
     return tf, ssm, gh
 
 
-def _generate_env(site: Site) -> str:
+def _generate_env_overrides(site: Site) -> dict[str, str]:
     secret_key = secrets.token_urlsafe(32)
 
-    base_vars = {
+    overrides = {
         "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@observal-db:5432/observal",
         "SECRET_KEY": secret_key,
         "CLICKHOUSE_URL": "clickhouse://default:clickhouse@observal-clickhouse:8123/observal",
@@ -49,8 +49,35 @@ def _generate_env(site: Site) -> str:
         "CLICKHOUSE_PASSWORD": "clickhouse",
         "DEPLOYMENT_MODE": "enterprise",
     }
-    base_vars.update(site.env_overrides or {})
-    return "\n".join(f"{k}={v}" for k, v in base_vars.items())
+    overrides.update(site.env_overrides or {})
+    return overrides
+
+
+def _write_env_script(overrides: dict[str, str]) -> str:
+    """Shell snippet: cp .env.example .env, write overrides to a temp file,
+    then use Python to merge (override existing keys, append new ones)."""
+    overrides_content = "\n".join(f"{k}={v}" for k, v in overrides.items())
+    return f"""cp .env.example .env
+cat > /tmp/flare-overrides.env << 'OVERRIDESEOF'
+{overrides_content}
+OVERRIDESEOF
+python3 -c "
+import collections
+env = collections.OrderedDict()
+for path in ['.env', '/tmp/flare-overrides.env']:
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            if '=' in line:
+                k, v = line.split('=', 1)
+                env[k] = v
+with open('.env', 'w') as f:
+    for k, v in env.items():
+        f.write(f'{{k}}={{v}}\\n')
+"
+rm -f /tmp/flare-overrides.env"""
 
 
 def _idle_cron_block(site: Site) -> str:
@@ -91,7 +118,7 @@ echo "$EXISTING
 
 
 def _deploy_script(site: Site, sha: str) -> str:
-    env_content = _generate_env(site)
+    env_script = _write_env_script(_generate_env_overrides(site))
     return f"""#!/bin/bash
 set -euo pipefail
 exec > /var/log/flare-deploy.log 2>&1
@@ -117,10 +144,8 @@ else
     git checkout {shlex.quote(sha)}
 fi
 
-# Write .env
-cat > /opt/observal/.env << 'ENVEOF'
-{env_content}
-ENVEOF
+# Write .env: start from .env.example defaults, then apply Flare overrides
+{env_script}
 
 # Configure Nginx for this domain
 sed -i "s/server_name .*/server_name {site.domain};/" /opt/observal/docker/nginx.production.conf
@@ -342,7 +367,7 @@ async def redeploy_site(
         await publish_site_event(str(site.id), "status_change", status="deploying", message="Redeploying...")
 
         # Deploy updated code — retry with volume wipe if init fails (schema migration mismatch)
-        env_content = _generate_env(site)
+        env_script = _write_env_script(_generate_env_overrides(site))
         update_script = f"""#!/bin/bash
 set -euo pipefail
 exec > /var/log/flare-deploy.log 2>&1
@@ -350,9 +375,8 @@ cd /opt/observal
 git fetch origin {shlex.quote(sha)}
 git checkout {shlex.quote(sha)}
 
-cat > /opt/observal/.env << 'ENVEOF'
-{env_content}
-ENVEOF
+# Write .env: start from .env.example defaults, then apply Flare overrides
+{env_script}
 
 COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
 $COMPOSE up -d --build 2>&1
