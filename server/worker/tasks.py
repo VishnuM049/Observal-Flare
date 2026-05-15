@@ -106,6 +106,8 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
                 await publish_site_event(site_id, "stage_progress", message="Starting EC2 instance...")
                 await start_ec2_instance(site.instance_id)
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
+            # Warm-up request to create an lb log entry so the idle cron doesn't immediately sleep the site
+            await remote.run_command(site.instance_id, f"curl -sf -o /dev/null https://{site.domain}/ || true", timeout_seconds=30)
             site.status = SiteStatus.RUNNING
             site.last_activity_at = datetime.now(timezone.utc)
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details=audit_details(site)))
