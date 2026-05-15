@@ -136,7 +136,7 @@ fi
 # Start services (--build ensures we use the checked-out source, not stale registry images)
 # || true: compose may exit non-zero if init container exits (expected); Flare health check verifies the site
 cd /opt/observal
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build || true
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build || true
 
 # Disable strict mode for auxiliary setup (cron, etc.) — failures here shouldn't kill the deploy
 set +euo pipefail
@@ -264,7 +264,7 @@ async def destroy_site(
         # Stage 1: Stop application (best-effort — instance may be unreachable)
         if site.instance_id:
             try:
-                await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down", timeout_seconds=60)
+                await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml down", timeout_seconds=60)
             except Exception:
                 logger.warning("Could not stop application on %s (instance may be unreachable)", site.instance_id)
 
@@ -328,7 +328,7 @@ async def redeploy_site(
             if ec2_state != "running":
                 await publish_site_event(str(site.id), "stage_progress", message="Starting EC2 instance...")
                 await start_ec2_instance(site.instance_id)
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             if site.status in (SiteStatus.SLEEPING, SiteStatus.STOPPED):
                 site.status = SiteStatus.RUNNING
                 await db.commit()
@@ -354,7 +354,7 @@ cat > /opt/observal/.env << 'ENVEOF'
 {env_content}
 ENVEOF
 
-COMPOSE="docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
+COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
 $COMPOSE up -d --build 2>&1
 
 # Wait for init container to finish (up to 5 min)
@@ -407,8 +407,8 @@ $COMPOSE restart observal-lb 2>/dev/null || true
             wipe_script = """#!/bin/bash
 set -euo pipefail
 cd /opt/observal
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down -v
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml down -v
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build
 """
             await remote.run_command(site.instance_id, wipe_script)
             healthy = await _wait_for_healthy(site)
