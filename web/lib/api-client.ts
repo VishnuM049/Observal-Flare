@@ -101,6 +101,11 @@ export const costs = {
     request<CostSummary>(`/api/costs?history_days=${historyDays}&projection_days=${projectionDays}`),
 };
 
+// Env vars
+export const envVars = {
+  known: () => request<{ key: string; default: string; description: string; section: string }[]>("/api/env-vars/known"),
+};
+
 // Health
 export const health = {
   check: () => request<{ status: string; checks: Record<string, string> }>("/api/health"),
