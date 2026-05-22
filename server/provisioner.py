@@ -5,11 +5,13 @@ injectable dependencies so it works with both real AWS and mock implementations.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import shlex
 from datetime import datetime, timezone
 
+import boto3
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -55,14 +57,15 @@ def _generate_env_overrides(site: Site) -> dict[str, str]:
 
 def _write_env_script(overrides: dict[str, str]) -> str:
     """Shell snippet: cp .env.example .env, write overrides to a temp file,
-    then use Python to merge (override existing keys, append new ones)."""
+    then use Python to merge (override existing keys, append new ones).
+    Finally, verify all overrides are present in the resulting .env."""
     overrides_content = "\n".join(f"{k}={v}" for k, v in overrides.items())
     return f"""cp .env.example .env
 cat > /tmp/flare-overrides.env << 'OVERRIDESEOF'
 {overrides_content}
 OVERRIDESEOF
 python3 -c "
-import collections
+import collections, sys
 env = collections.OrderedDict()
 for path in ['.env', '/tmp/flare-overrides.env']:
     with open(path) as f:
@@ -76,8 +79,84 @@ for path in ['.env', '/tmp/flare-overrides.env']:
 with open('.env', 'w') as f:
     for k, v in env.items():
         f.write(f'{{k}}={{v}}\\n')
+
+# Verify all overrides were applied correctly
+overrides = {{}}
+with open('/tmp/flare-overrides.env') as f:
+    for line in f:
+        line = line.strip()
+        if line and '=' in line:
+            k, v = line.split('=', 1)
+            overrides[k] = v
+missing = []
+mismatched = []
+for k, expected in overrides.items():
+    actual = env.get(k)
+    if actual is None:
+        missing.append(k)
+    elif actual != expected:
+        mismatched.append(f'{{k}}: expected [{{expected[:20]}}...] got [{{actual[:20]}}...]')
+if missing or mismatched:
+    print('WARNING: Some env overrides may not have applied correctly. Consider redeploying after fixing.', file=sys.stderr)
+    if missing:
+        print(f'  Missing keys: {{missing}}', file=sys.stderr)
+    if mismatched:
+        for m in mismatched:
+            print(f'  Mismatch: {{m}}', file=sys.stderr)
+else:
+    print(f'ENV OK: {{len(overrides)}} overrides verified')
 "
 rm -f /tmp/flare-overrides.env"""
+
+
+async def _validate_credentials(overrides: dict[str, str]) -> list[str]:
+    """Validate external credentials before deploy. Returns list of errors (empty = all good)."""
+    errors: list[str] = []
+    loop = asyncio.get_event_loop()
+
+    aws_key = overrides.get("AWS_ACCESS_KEY_ID", "")
+    aws_secret = overrides.get("AWS_SECRET_ACCESS_KEY", "")
+    aws_region = overrides.get("AWS_REGION", "us-east-1")
+
+    if aws_key and aws_secret:
+        try:
+            sts = boto3.client(
+                "sts",
+                aws_access_key_id=aws_key,
+                aws_secret_access_key=aws_secret,
+                region_name=aws_region,
+            )
+            await loop.run_in_executor(None, sts.get_caller_identity)
+        except Exception as e:
+            errors.append(f"AWS credentials invalid: {e}")
+
+    eval_key = overrides.get("EVAL_MODEL_API_KEY", "")
+    eval_provider = overrides.get("EVAL_MODEL_PROVIDER", "")
+    eval_model = overrides.get("EVAL_MODEL_NAME", "")
+
+    if eval_key and eval_provider == "bedrock" and aws_key and aws_secret:
+        try:
+            bedrock = boto3.client(
+                "bedrock-runtime",
+                aws_access_key_id=aws_key,
+                aws_secret_access_key=aws_secret,
+                region_name=aws_region,
+            )
+            import json
+            body = json.dumps({"anthropic_version": "bedrock-2023-05-31", "max_tokens": 1, "messages": [{"role": "user", "content": "hi"}]})
+            await loop.run_in_executor(None, lambda: bedrock.invoke_model(modelId=eval_model, body=body))
+        except Exception as e:
+            err_str = str(e)
+            if "AccessDenied" in err_str or "UnrecognizedClient" in err_str:
+                errors.append(f"Bedrock access denied for model {eval_model}: {e}")
+            elif "ValidationException" in err_str or "ModelNotFound" in err_str:
+                errors.append(f"Bedrock model {eval_model} not found or invalid: {e}")
+            elif "ThrottlingException" in err_str:
+                pass  # throttling means creds are valid, just rate-limited
+            else:
+                errors.append(f"Bedrock validation failed for {eval_model}: {e}")
+
+    return errors
 
 
 def _idle_cron_block(site: Site) -> str:
@@ -121,7 +200,7 @@ def _deploy_script(site: Site, sha: str) -> str:
     env_script = _write_env_script(_generate_env_overrides(site))
     return f"""#!/bin/bash
 set -euo pipefail
-exec > /var/log/flare-deploy.log 2>&1
+exec > >(tee /var/log/flare-deploy.log) 2>&1
 
 echo "=== Flare deploy for {site.domain} at {sha} ==="
 
@@ -172,8 +251,6 @@ echo "=== Deploy complete ==="
 
 
 async def _wait_for_healthy(site: Site, timeout_seconds: int = 600) -> bool:
-    import asyncio
-
     if get_settings().is_local:
         logger.info("[mock] Skipping health check for %s (local mode)", site.domain)
         await asyncio.sleep(2)
@@ -211,6 +288,17 @@ async def provision_site(
     github = github or default_github
 
     try:
+        # Stage 0: Validate credentials (warn but don't block)
+        if not get_settings().is_local:
+            overrides = _generate_env_overrides(site)
+            await publish_site_event(str(site.id), "stage_progress", message="Validating credentials...")
+            cred_errors = await _validate_credentials(overrides)
+            if cred_errors:
+                warning = f"Credential warning: {'; '.join(cred_errors)}. Deploy will continue but affected features may not work. Consider fixing and redeploying."
+                logger.warning(warning)
+                site.error_message = warning
+                await publish_site_event(str(site.id), "stage_progress", message=warning)
+
         # Stage 1: Resolve deploy source
         transition_status(site, SiteStatus.PROVISIONING)
         await db.commit()
@@ -298,7 +386,6 @@ async def destroy_site(
 
         # Stage 3: Clean up Terraform state from S3
         try:
-            import boto3
             s3 = boto3.client("s3", region_name=get_settings().aws_region)
             s3.delete_object(Bucket=get_settings().terraform_state_bucket, Key=f"sites/{site.name}/terraform.tfstate")
         except Exception:
@@ -346,6 +433,17 @@ async def redeploy_site(
     github = github or default_github
 
     try:
+        # Stage 0: Validate credentials (warn but don't block)
+        if not get_settings().is_local:
+            overrides = _generate_env_overrides(site)
+            await publish_site_event(str(site.id), "stage_progress", message="Validating credentials...")
+            cred_errors = await _validate_credentials(overrides)
+            if cred_errors:
+                warning = f"Credential warning: {'; '.join(cred_errors)}. Deploy will continue but affected features may not work. Consider fixing and redeploying."
+                logger.warning(warning)
+                site.error_message = warning
+                await publish_site_event(str(site.id), "stage_progress", message=warning)
+
         # Ensure EC2 is running (handles sleeping, stopped, failed, or mid-transition states)
         if not get_settings().is_local and site.instance_id:
             from server.ec2 import start_ec2_instance, _get_client, _get_instance_state
@@ -370,7 +468,7 @@ async def redeploy_site(
         env_script = _write_env_script(_generate_env_overrides(site))
         update_script = f"""#!/bin/bash
 set -euo pipefail
-exec > /var/log/flare-deploy.log 2>&1
+exec > >(tee /var/log/flare-deploy.log) 2>&1
 cd /opt/observal
 git fetch origin {shlex.quote(sha)}
 git checkout {shlex.quote(sha)}
