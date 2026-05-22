@@ -202,6 +202,22 @@ async def redeploy(site_id: uuid.UUID, db: DB, user: CurrentUser):
     return SiteResponse.model_validate(site)
 
 
+@router.post("/{site_id}/rebuild", response_model=SiteResponse)
+async def rebuild(site_id: uuid.UUID, db: DB, user: CurrentUser):
+    try:
+        site = await get_site_for_update(db, site_id, user)
+    except SiteError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if site.status not in (SiteStatus.RUNNING, SiteStatus.SLEEPING, SiteStatus.FAILED):
+        raise HTTPException(status_code=400, detail=f"Cannot rebuild from status {site.status.value}")
+
+    db.add(AuditLog(user_id=user.id, site_id=site.id, action="site.rebuild_requested", details=audit_details(site, from_status=site.status.value)))
+    pool = _get_pool()
+    await pool.enqueue_job("rebuild_site", str(site.id))
+    await db.commit()
+    return SiteResponse.model_validate(site)
+
+
 @router.post("/{site_id}/stop", response_model=SiteResponse)
 async def stop_site(site_id: uuid.UUID, db: DB, user: CurrentUser):
     try:

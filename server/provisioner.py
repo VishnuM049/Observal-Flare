@@ -560,3 +560,90 @@ docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-com
         raise
 
     return site
+
+
+async def rebuild_site(
+    db: AsyncSession,
+    site: Site,
+    *,
+    remote: SSMRunner | None = None,
+) -> Site:
+    """Rebuild containers from existing code — no git pull, just env rewrite + docker compose rebuild."""
+    default_infra, default_remote, _ = _get_defaults()
+    remote = remote or default_remote
+
+    try:
+        # Stage 0: Validate credentials (warn but don't block)
+        if not get_settings().is_local:
+            overrides = _generate_env_overrides(site)
+            await publish_site_event(str(site.id), "stage_progress", message="Validating credentials...")
+            cred_errors = await _validate_credentials(overrides)
+            if cred_errors:
+                warning = f"Credential warning: {'; '.join(cred_errors)}. Rebuild will continue but affected features may not work. Consider fixing and rebuilding."
+                logger.warning(warning)
+                site.error_message = warning
+                await publish_site_event(str(site.id), "stage_progress", message=warning)
+
+        # Ensure EC2 is running
+        if not get_settings().is_local and site.instance_id:
+            from server.ec2 import start_ec2_instance, _get_client, _get_instance_state
+            ec2_state = await _get_instance_state(_get_client(), site.instance_id)
+            if ec2_state != "running":
+                await publish_site_event(str(site.id), "stage_progress", message="Starting EC2 instance...")
+                await start_ec2_instance(site.instance_id)
+
+        transition_status(site, SiteStatus.DEPLOYING)
+        await db.commit()
+        await publish_site_event(str(site.id), "status_change", status="deploying", message="Rebuilding...")
+
+        env_script = _write_env_script(_generate_env_overrides(site))
+        rebuild_script = f"""#!/bin/bash
+set -euo pipefail
+exec > >(tee /var/log/flare-deploy.log) 2>&1
+cd /opt/observal
+
+# Write .env: start from .env.example defaults, then apply Flare overrides
+{env_script}
+
+COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
+$COMPOSE up -d --build 2>&1
+
+# Wait for init container to finish (up to 5 min)
+for i in $(seq 1 60); do
+    if $COMPOSE ps observal-init 2>/dev/null | grep -qE "Exited|exited"; then
+        break
+    fi
+    sleep 5
+done
+
+# Restart nginx lb to pick up new container IPs
+$COMPOSE restart observal-lb 2>/dev/null || true
+"""
+        cmd_result = await remote.run_command(site.instance_id, rebuild_script)
+        if cmd_result.status != "success":
+            raise RuntimeError(f"Rebuild script failed: {cmd_result.output[:500]}")
+
+        healthy = await _wait_for_healthy(site)
+        if healthy:
+            transition_status(site, SiteStatus.RUNNING)
+            site.last_deployed_at = datetime.now(timezone.utc)
+            site.error_message = None
+            db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.rebuilt", details=audit_details(site)))
+            await db.commit()
+            await publish_site_event(str(site.id), "status_change", status="running", message="Rebuild complete")
+        else:
+            raise RuntimeError("Site unhealthy after rebuild")
+
+    except Exception as e:
+        logger.exception("Rebuild failed for site %s", site.name)
+        try:
+            site.status = SiteStatus.FAILED
+            site.error_message = str(e)[:2000]
+            await db.commit()
+        except Exception:
+            logger.exception("Failed to persist error state for site %s", site.name)
+            await db.rollback()
+        await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
+        raise
+
+    return site

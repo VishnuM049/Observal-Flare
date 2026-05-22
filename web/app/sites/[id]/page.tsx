@@ -162,6 +162,7 @@ export default function SiteDetailPage() {
   const pendingStatuses: Record<string, SiteStatus> = {
     stop: "stopping",
     redeploy: "deploying",
+    rebuild: "deploying",
     destroy: "destroying",
   };
 
@@ -173,11 +174,13 @@ export default function SiteDetailPage() {
       const fn =
         action === "redeploy"
           ? sitesApi.redeploy
-          : action === "stop"
-            ? sitesApi.stop
-            : action === "start"
-              ? sitesApi.start
-              : sitesApi.destroy;
+          : action === "rebuild"
+            ? sitesApi.rebuild
+            : action === "stop"
+              ? sitesApi.stop
+              : action === "start"
+                ? sitesApi.start
+                : sitesApi.destroy;
       await fn(site.id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Action failed");
@@ -570,9 +573,14 @@ export default function SiteDetailPage() {
       {isActive && (
         <div className="flex gap-3">
           {["running", "sleeping", "failed"].includes(site.status) && (
-            <button onClick={() => doAction("redeploy")} disabled={actionLoading !== null} className="btn-primary">
-              {actionLoading === "redeploy" ? "..." : "Redeploy"}
-            </button>
+            <>
+              <button onClick={() => doAction("redeploy")} disabled={actionLoading !== null} className="btn-primary">
+                {actionLoading === "redeploy" ? "..." : "Redeploy"}
+              </button>
+              <button onClick={() => doAction("rebuild")} disabled={actionLoading !== null} className="btn-secondary">
+                {actionLoading === "rebuild" ? "..." : "Rebuild"}
+              </button>
+            </>
           )}
           {site.status === "running" && (
             <button onClick={() => doAction("stop")} disabled={actionLoading !== null} className="btn-primary">

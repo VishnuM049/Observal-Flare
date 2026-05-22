@@ -109,14 +109,14 @@ async def _handle_pull_request(db: DB, payload: dict) -> dict:
             .where(
                 Site.deploy_type == DeployType.PR,
                 Site.deploy_ref == pr_number,
-                Site.status.in_([s.value for s in TEARDOWN_STATUSES]),
+                Site.status.notin_([SiteStatus.DESTROYING.value, SiteStatus.DESTROYED.value]),
             )
         )
         sites = list(result.scalars().all())
 
         for site in sites:
-            site.scheduled_destroy_at = datetime.now(timezone.utc) + timedelta(hours=24)
-            logger.info("Auto-teardown: site %s scheduled for destruction in 24h (PR #%s closed)", site.name, pr_number)
+            site.error_message = f"PR #{pr_number} was closed/merged. This site is no longer tracking an active PR. Consider destroying it or pinning to a branch/commit."
+            logger.info("PR closed: warning set on site %s (PR #%s)", site.name, pr_number)
 
         await db.commit()
 

@@ -118,7 +118,7 @@ async def create_site(
         raise SiteError(f"A site named '{name}' already exists")
 
     if auto_wipe_on_failure is None:
-        auto_wipe_on_failure = deploy_type in (DeployType.PR, DeployType.BRANCH)
+        auto_wipe_on_failure = False
 
     if sleep_mode is None:
         if deploy_type in (DeployType.PR, DeployType.BRANCH):

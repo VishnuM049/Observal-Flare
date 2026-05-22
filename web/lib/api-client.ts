@@ -61,6 +61,8 @@ export const sites = {
     }),
   redeploy: (id: string) =>
     request<Site>(`/api/sites/${id}/redeploy`, { method: "POST" }),
+  rebuild: (id: string) =>
+    request<Site>(`/api/sites/${id}/rebuild`, { method: "POST" }),
   stop: (id: string) =>
     request<Site>(`/api/sites/${id}/stop`, { method: "POST" }),
   start: (id: string) =>

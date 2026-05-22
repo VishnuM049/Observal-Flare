@@ -13,7 +13,7 @@ from server.events import publish_site_event
 from server.models.audit_log import AuditLog
 from server.models.site import Site, SiteStatus, SleepMode
 from server.notifications.email import send_site_notification
-from server.provisioner import destroy_site, provision_site, redeploy_site
+from server.provisioner import destroy_site, provision_site, rebuild_site, redeploy_site
 from server.services.site_service import audit_details, transition_status
 from server.ssm import SSMRunner
 from server.mock import MockSSM
@@ -65,6 +65,15 @@ async def task_redeploy_site(ctx: dict, site_id: str) -> None:
             pool = await create_pool(get_redis_settings())
             await pool.enqueue_job("redeploy_site", site_id)
             await pool.aclose()
+
+
+async def task_rebuild_site(ctx: dict, site_id: str) -> None:
+    async with async_session() as db:
+        site = await db.get(Site, uuid.UUID(site_id))
+        if site is None:
+            logger.error("Site %s not found for rebuild", site_id)
+            return
+        await rebuild_site(db, site)
 
 
 async def task_stop_site(ctx: dict, site_id: str) -> None:
@@ -257,6 +266,7 @@ class WorkerSettings:
         func(task_provision_site, name="provision_site"),
         func(task_destroy_site, name="destroy_site"),
         func(task_redeploy_site, name="redeploy_site"),
+        func(task_rebuild_site, name="rebuild_site"),
         func(task_stop_site, name="stop_site"),
         func(task_start_site, name="start_site"),
         func(task_sleep_site, name="sleep_site"),
