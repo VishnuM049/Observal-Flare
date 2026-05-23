@@ -8,6 +8,14 @@ terraform {
     }
   }
 
+  # IMPORTANT: Backend config is passed at init time by server/terraform.py.
+  # Do NOT run `terraform init` in this directory without -backend-config flags:
+  #   -backend-config="bucket=flare-terraform-state"
+  #   -backend-config="key=sites/<site_name>/terraform.tfstate"
+  #   -backend-config="region=<aws_region>"
+  #   -backend-config="dynamodb_table=flare-terraform-locks"
+  # Running init without these flags will create LOCAL state, causing drift
+  # and potential duplicate resources on next apply.
   backend "s3" {}
 }
 

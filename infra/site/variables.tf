@@ -31,3 +31,9 @@ variable "subnet_id" {
   type        = string
   default     = ""
 }
+
+variable "admin_cidr_blocks" {
+  description = "CIDR blocks allowed SSH access (emergency fallback)"
+  type        = list(string)
+  default     = []
+}

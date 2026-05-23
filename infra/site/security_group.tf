@@ -4,6 +4,14 @@ resource "aws_security_group" "site" {
   vpc_id      = var.vpc_id != "" ? var.vpc_id : null
 
   ingress {
+    description = "SSH (emergency fallback)"
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.admin_cidr_blocks
+  }
+
+  ingress {
     description = "HTTP"
     from_port   = 80
     to_port     = 80
