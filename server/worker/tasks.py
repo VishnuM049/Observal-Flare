@@ -273,8 +273,8 @@ class WorkerSettings:
     ]
     cron_jobs = [
         cron(cron_nightly_sleep, minute=0),
-        cron(cron_destroy_expired, minute=0),
-        cron(cron_stale_reminders, minute=0),
+        cron(cron_destroy_expired, minute=5),
+        cron(cron_stale_reminders, minute=10),
     ]
     job_timeout = 1800
     max_jobs = 4

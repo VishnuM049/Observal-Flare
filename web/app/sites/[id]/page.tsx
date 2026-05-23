@@ -98,15 +98,27 @@ export default function SiteDetailPage() {
 
   useEffect(() => {
     loadSite();
-    const interval = setInterval(loadSite, 15000);
-    return () => clearInterval(interval);
   }, [loadSite]);
 
   useEffect(() => {
     let ws: WebSocket | null = null;
     let delay = 1000;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    let wsConnected = false;
     let stopped = false;
+
+    function startPolling() {
+      if (pollInterval) return;
+      pollInterval = setInterval(loadSite, 15000);
+    }
+
+    function stopPolling() {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+      }
+    }
 
     function connect() {
       if (stopped) return;
@@ -116,6 +128,8 @@ export default function SiteDetailPage() {
 
       ws.onopen = () => {
         delay = 1000;
+        wsConnected = true;
+        stopPolling();
       };
 
       ws.onmessage = (e) => {
@@ -128,6 +142,7 @@ export default function SiteDetailPage() {
             if (STABLE.includes(event.status)) {
               setActionLoading(null);
               setTimeout(() => setStageMessage(null), 4000);
+              loadSite();
             }
           } else if (event.type === "stage_progress") {
             setStageMessage(event.message);
@@ -135,6 +150,7 @@ export default function SiteDetailPage() {
             setSite((prev: Site | null) => prev ? { ...prev, status: "failed", error_message: event.message } : prev);
             setStageMessage(null);
             setActionLoading(null);
+            loadSite();
           }
         } catch {
           // ignore malformed messages
@@ -142,7 +158,9 @@ export default function SiteDetailPage() {
       };
 
       ws.onclose = () => {
+        wsConnected = false;
         if (stopped) return;
+        startPolling();
         reconnectTimer = setTimeout(() => {
           delay = Math.min(delay * 2, 30000);
           connect();
@@ -151,9 +169,12 @@ export default function SiteDetailPage() {
     }
 
     connect();
+    // Start polling as fallback until WS connects
+    if (!wsConnected) startPolling();
 
     return () => {
       stopped = true;
+      stopPolling();
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (ws) ws.close();
     };

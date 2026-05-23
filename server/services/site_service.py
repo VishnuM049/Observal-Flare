@@ -113,6 +113,17 @@ async def create_site(
         validate_env_overrides(env_overrides)
     settings = get_settings()
 
+    if not settings.is_local:
+        missing = []
+        if not settings.route53_zone_id:
+            missing.append("ROUTE53_ZONE_ID")
+        if not settings.github_token:
+            missing.append("GITHUB_TOKEN")
+        if not settings.aws_access_key_id:
+            missing.append("AWS_ACCESS_KEY_ID")
+        if missing:
+            raise SiteError(f"Flare is not fully configured — missing: {', '.join(missing)}")
+
     existing = await db.execute(select(Site).where(Site.name == name, Site.status != SiteStatus.DESTROYED))
     if existing.scalar_one_or_none() is not None:
         raise SiteError(f"A site named '{name}' already exists")

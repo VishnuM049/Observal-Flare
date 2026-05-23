@@ -103,6 +103,7 @@ async def list_all_sites(db: DB, user: CurrentUser):
 
 @router.post("", response_model=SiteResponse, status_code=201)
 async def create_new_site(body: SiteCreateRequest, db: DB, user: CurrentUser):
+    pool = _get_pool()
     try:
         site = await create_site(
             db,
@@ -124,7 +125,6 @@ async def create_new_site(body: SiteCreateRequest, db: DB, user: CurrentUser):
     except SiteError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    pool = _get_pool()
     await pool.enqueue_job("provision_site", str(site.id))
     return SiteResponse.model_validate(site)
 

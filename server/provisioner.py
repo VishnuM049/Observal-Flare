@@ -177,7 +177,7 @@ COMPOSE="docker compose -f /opt/observal/docker/docker-compose.yml -f /opt/obser
 
 # Get recent lb logs within the idle threshold, excluding bots/scanners
 LOGS=$($COMPOSE logs observal-lb --since "$((THRESHOLD))s" 2>/dev/null || true)
-HUMAN=$(echo "$LOGS" | grep "HTTP/" | grep -viE "bot|crawl|spider|censys|scanner|slurp|semrush|ahrefs|petalsearch|yandex|bingpreview|facebookexternalhit|bytespider" || true)
+HUMAN=$(echo "$LOGS" | grep "HTTP/" | grep -viE "bot|crawl|spider|censys|scanner|slurp|semrush|ahrefs|petalsearch|yandex|bingpreview|facebookexternalhit|bytespider|datadog|uptimerobot|pingdom|newrelic|cloudflare|prometheus|grafana|statuscake|site24x7|freshping|kuma" || true)
 RECENT=$(echo "$HUMAN" | grep -c "HTTP/" || echo "0")
 
 if [ "$RECENT" -gt 0 ]; then
@@ -234,7 +234,7 @@ sed -i "s|ssl_certificate_key .*|ssl_certificate_key /etc/letsencrypt/live/{site
 # TLS cert
 if ! [ -d "/etc/letsencrypt/live/{site.domain}" ]; then
     apt-get install -y certbot
-    certbot certonly --standalone -d {site.domain} --non-interactive --agree-tos -m admin@observal.io
+    certbot certonly --standalone -d {site.domain} --non-interactive --agree-tos -m {site.requestor_email}
 fi
 
 # Start services (--build ensures we use the checked-out source, not stale registry images)
@@ -489,9 +489,7 @@ done
 
 # Check if init container failed (schema migration mismatch)
 if $COMPOSE logs observal-init 2>&1 | grep -q "Can't locate revision"; then
-    echo "=== Init failed due to migration mismatch, wiping data and retrying ==="
-    $COMPOSE down -v
-    $COMPOSE up -d --build
+{"    echo '=== Migration mismatch detected, wiping data and retrying ==='\n    $COMPOSE down -v\n    $COMPOSE up -d --build" if site.auto_wipe_on_failure else "    echo 'ERROR: Migration mismatch detected. Data preserved. Enable auto-wipe or resolve manually.'\n    exit 1"}
 fi
 
 # Restart nginx lb to pick up new container IPs
