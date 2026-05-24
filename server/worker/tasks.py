@@ -36,9 +36,9 @@ def _get_remote(site: Site | None = None) -> SSMRunner:
 def _get_compute(site: Site | None = None) -> ComputeRunner:
     if get_settings().use_mock_compute:
         return MockCompute()
-    # GCP compute will be added in Phase 6
-    # if site and site.cloud_provider == "gcp":
-    #     return GCPCompute(...)
+    if site and site.cloud_provider == "gcp":
+        from server.gcp_compute import GCPCompute
+        return GCPCompute()
     return AWSCompute()
 
 
