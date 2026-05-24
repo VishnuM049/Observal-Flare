@@ -88,11 +88,15 @@ def validate_env_overrides(overrides: dict[str, str]) -> None:
             raise SiteError(f"Env var '{key}' contains newlines — not allowed")
 
 
+VALID_CLOUD_PROVIDERS = frozenset({"aws", "gcp"})
+
+
 async def create_site(
     db: AsyncSession,
     *,
     user: User,
     name: str,
+    cloud_provider: str = "aws",
     deploy_type: DeployType,
     deploy_ref: str,
     requestor_email: str,
@@ -107,6 +111,8 @@ async def create_site(
     ttl_days: int | None = None,
 ) -> Site:
     validate_site_name(name)
+    if cloud_provider not in VALID_CLOUD_PROVIDERS:
+        raise SiteError(f"Invalid cloud provider: '{cloud_provider}' — must be 'aws' or 'gcp'")
     validate_deploy_ref(deploy_ref)
     validate_instance_size(instance_size)
     if env_overrides:
@@ -119,10 +125,16 @@ async def create_site(
             missing.append("ROUTE53_ZONE_ID")
         if not settings.github_token:
             missing.append("GITHUB_TOKEN")
-        if not settings.aws_access_key_id:
-            missing.append("AWS_ACCESS_KEY_ID")
+        if cloud_provider == "aws":
+            if not settings.aws_access_key_id:
+                missing.append("AWS_ACCESS_KEY_ID")
+        elif cloud_provider == "gcp":
+            if not settings.gcp_project_id:
+                missing.append("GCP_PROJECT_ID")
+            if not settings.gcp_terraform_state_bucket:
+                missing.append("GCP_TERRAFORM_STATE_BUCKET")
         if missing:
-            raise SiteError(f"Flare is not fully configured — missing: {', '.join(missing)}")
+            raise SiteError(f"Flare is not fully configured for {cloud_provider.upper()} — missing: {', '.join(missing)}")
 
     existing = await db.execute(select(Site).where(Site.name == name, Site.status != SiteStatus.DESTROYED))
     if existing.scalar_one_or_none() is not None:
@@ -142,6 +154,7 @@ async def create_site(
 
     site = Site(
         name=name,
+        cloud_provider=cloud_provider,
         domain=f"{name}.{settings.site_base_domain}",
         deploy_type=deploy_type,
         deploy_ref=deploy_ref,

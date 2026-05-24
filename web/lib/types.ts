@@ -24,9 +24,12 @@ export interface User {
   is_active: boolean;
 }
 
+export type CloudProvider = "aws" | "gcp";
+
 export interface Site {
   id: string;
   name: string;
+  cloud_provider: CloudProvider;
   domain: string;
   status: SiteStatus;
   requestor_email: string;
@@ -79,6 +82,7 @@ export interface CostSummary {
 
 export interface SiteCreateRequest {
   name: string;
+  cloud_provider?: CloudProvider;
   deploy_type: DeployType;
   deploy_ref: string;
   requestor_email: string;

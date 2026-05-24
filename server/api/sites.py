@@ -33,6 +33,7 @@ def _get_pool() -> ArqRedis:
 
 class SiteCreateRequest(BaseModel):
     name: str
+    cloud_provider: str = "aws"
     deploy_type: DeployType
     deploy_ref: str
     requestor_email: EmailStr
@@ -63,6 +64,7 @@ class SiteUpdateRequest(BaseModel):
 class SiteResponse(BaseModel):
     id: uuid.UUID
     name: str
+    cloud_provider: str
     domain: str
     status: SiteStatus
     requestor_email: str
@@ -109,6 +111,7 @@ async def create_new_site(body: SiteCreateRequest, db: DB, user: CurrentUser):
             db,
             user=user,
             name=body.name,
+            cloud_provider=body.cloud_provider,
             deploy_type=body.deploy_type,
             deploy_ref=body.deploy_ref,
             requestor_email=body.requestor_email,

@@ -37,9 +37,15 @@ class Settings(BaseSettings):
     aws_secret_access_key: str = ""
     aws_region: str = "us-east-1"
 
-    # Terraform
+    # Terraform (AWS)
     terraform_state_bucket: str = "flare-terraform-state"
     terraform_lock_table: str = "flare-terraform-locks"
+
+    # GCP
+    gcp_project_id: str = ""
+    gcp_region: str = "us-central1"
+    gcp_zone: str = "us-central1-a"
+    gcp_terraform_state_bucket: str = ""
 
     # Route53
     route53_zone_id: str = ""

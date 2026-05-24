@@ -30,6 +30,11 @@ class DeployType(str, enum.Enum):
     RELEASE = "release"
 
 
+class CloudProvider(str, enum.Enum):
+    AWS = "aws"
+    GCP = "gcp"
+
+
 class SleepMode(str, enum.Enum):
     NONE = "none"
     NIGHTLY = "nightly"
@@ -48,6 +53,9 @@ class Site(Base):
     status: Mapped[SiteStatus] = mapped_column(Enum(SiteStatus, values_callable=lambda e: [x.value for x in e]), nullable=False, default=SiteStatus.PENDING)
     requestor_email: Mapped[str] = mapped_column(String(320), nullable=False)
     created_by: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+
+    # Cloud provider
+    cloud_provider: Mapped[str] = mapped_column(String(10), nullable=False, default="aws")
 
     # Deploy source
     deploy_type: Mapped[DeployType] = mapped_column(Enum(DeployType, values_callable=lambda e: [x.value for x in e]), nullable=False)
@@ -80,7 +88,7 @@ class Site(Base):
     idle_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
     # AWS resources
-    instance_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    instance_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     terraform_state_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

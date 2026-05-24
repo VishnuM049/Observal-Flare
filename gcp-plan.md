@@ -121,11 +121,21 @@ class MockCompute(ComputeRunner):
 
 ### Phase 2: Add `cloud_provider` to Site Model
 
-**Create:** Migration `server/alembic/versions/0003_add_cloud_provider.py`
+**Create:** Migration `server/alembic/versions/0002_add_cloud_provider.py`
 ```sql
 ALTER TABLE sites ADD COLUMN cloud_provider VARCHAR(10) NOT NULL DEFAULT 'aws';
 ALTER TABLE sites ALTER COLUMN instance_id TYPE VARCHAR(64);  -- GCE names up to 63 chars
 ```
+
+**Post-deploy step:** Run migration on the Flare DB after pulling:
+```bash
+alembic -c server/alembic.ini upgrade head
+```
+Or manually:
+```bash
+docker exec flare-db-1 psql -U postgres -d flare -c "ALTER TABLE sites ADD COLUMN cloud_provider VARCHAR(10) NOT NULL DEFAULT 'aws'; ALTER TABLE sites ALTER COLUMN instance_id TYPE VARCHAR(64);"
+```
+This is non-destructive: ADD COLUMN with DEFAULT doesn't rewrite existing rows, ALTER TYPE widening a varchar is instant. Existing AWS sites get `cloud_provider='aws'` automatically. No data loss, no downtime.
 
 **Modify:**
 - `server/models/site.py` — add `CloudProvider` enum (`AWS = "aws"`, `GCP = "gcp"`) + mapped column
