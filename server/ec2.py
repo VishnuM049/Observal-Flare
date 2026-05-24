@@ -75,12 +75,12 @@ async def start_ec2_instance(instance_id: str, timeout_seconds: int = 300) -> No
 
     if state == "running":
         logger.info("EC2 instance %s already running", instance_id)
-        await _wait_for_ssm(instance_id, timeout_seconds=90)
+        await _wait_for_ssm(instance_id, timeout_seconds=180)
         return
     if state == "pending":
         logger.info("EC2 instance %s already pending, waiting for running...", instance_id)
         await _wait_for_state(client, instance_id, "running", timeout_seconds)
-        await _wait_for_ssm(instance_id, timeout_seconds=90)
+        await _wait_for_ssm(instance_id, timeout_seconds=180)
         return
     if state == "stopping":
         logger.info("EC2 instance %s is stopping, waiting for stopped before starting...", instance_id)
@@ -90,10 +90,10 @@ async def start_ec2_instance(instance_id: str, timeout_seconds: int = 300) -> No
     logger.info("EC2 start requested for %s, waiting for running state...", instance_id)
     await _wait_for_state(client, instance_id, "running", timeout_seconds)
     logger.info("EC2 instance %s is running, waiting for SSM agent...", instance_id)
-    await _wait_for_ssm(instance_id, timeout_seconds=90)
+    await _wait_for_ssm(instance_id, timeout_seconds=180)
 
 
-async def _wait_for_ssm(instance_id: str, timeout_seconds: int = 90) -> None:
+async def _wait_for_ssm(instance_id: str, timeout_seconds: int = 180) -> None:
     loop = asyncio.get_running_loop()
     ssm = _get_ssm_client()
     deadline = loop.time() + timeout_seconds

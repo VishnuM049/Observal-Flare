@@ -13,7 +13,7 @@ from server.events import publish_site_event
 from server.models.audit_log import AuditLog
 from server.models.site import Site, SiteStatus, SleepMode
 from server.notifications.email import send_site_notification
-from server.provisioner import destroy_site, provision_site, rebuild_site, redeploy_site
+from server.provisioner import _wait_for_healthy, destroy_site, provision_site, rebuild_site, redeploy_site
 from server.services.site_service import audit_details, transition_status
 from server.ssm import SSMRunner
 from server.mock import MockSSM
@@ -57,7 +57,8 @@ async def task_redeploy_site(ctx: dict, site_id: str) -> None:
             return
         await redeploy_site(db, site)
 
-        await db.refresh(site)
+        result = await db.execute(select(Site).where(Site.id == site.id).with_for_update())
+        site = result.scalar_one()
         if site.redeploy_pending:
             site.redeploy_pending = False
             await db.commit()
@@ -117,6 +118,10 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             # Warm-up request to create an lb log entry so the idle cron doesn't immediately sleep the site
             await remote.run_command(site.instance_id, f"curl -sf -o /dev/null https://{site.domain}/ || true", timeout_seconds=30)
+            await publish_site_event(site_id, "stage_progress", message="Waiting for health check...")
+            healthy = await _wait_for_healthy(site, timeout_seconds=120)
+            if not healthy:
+                raise RuntimeError(f"Site {site.domain} did not become healthy after start")
             site.status = SiteStatus.RUNNING
             site.last_activity_at = datetime.now(timezone.utc)
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.started", details=audit_details(site)))

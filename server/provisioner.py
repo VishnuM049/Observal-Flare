@@ -381,8 +381,11 @@ async def destroy_site(
             except Exception:
                 logger.warning("Could not stop application on %s (instance may be unreachable)", site.instance_id)
 
-        # Stage 2: Destroy infrastructure (always runs)
-        await infra.destroy(site_name=site.name)
+        # Stage 2: Destroy infrastructure (best-effort — state may not exist for failed provisions)
+        try:
+            await infra.destroy(site_name=site.name)
+        except Exception:
+            logger.warning("Terraform destroy failed for %s (state may not exist)", site.name)
 
         # Stage 3: Clean up Terraform state from S3
         try:
