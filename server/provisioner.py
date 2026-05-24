@@ -125,10 +125,21 @@ else:
 rm -f /tmp/flare-overrides.env"""
 
 
-async def _validate_credentials(overrides: dict[str, str]) -> list[str]:
+async def _validate_credentials(overrides: dict[str, str], cloud_provider: str = "aws") -> list[str]:
     """Validate external credentials before deploy. Returns list of errors (empty = all good)."""
     errors: list[str] = []
     loop = asyncio.get_event_loop()
+
+    if cloud_provider == "gcp":
+        try:
+            import google.auth
+            credentials, project = await loop.run_in_executor(None, google.auth.default)
+            settings = get_settings()
+            if project and settings.gcp_project_id and project != settings.gcp_project_id:
+                errors.append(f"GCP credential project '{project}' does not match configured GCP_PROJECT_ID '{settings.gcp_project_id}'")
+        except Exception as e:
+            errors.append(f"GCP credentials invalid: {e}")
+        return errors
 
     aws_key = overrides.get("AWS_ACCESS_KEY_ID", "")
     aws_secret = overrides.get("AWS_SECRET_ACCESS_KEY", "")
@@ -310,7 +321,7 @@ async def provision_site(
         if not get_settings().is_local:
             overrides = _generate_env_overrides(site)
             await publish_site_event(str(site.id), "stage_progress", message="Validating credentials...")
-            cred_errors = await _validate_credentials(overrides)
+            cred_errors = await _validate_credentials(overrides, site.cloud_provider)
             if cred_errors:
                 warning = f"Credential warning: {'; '.join(cred_errors)}. Deploy will continue but affected features may not work. Consider fixing and redeploying."
                 logger.warning(warning)
@@ -456,7 +467,7 @@ async def redeploy_site(
         if not get_settings().is_local:
             overrides = _generate_env_overrides(site)
             await publish_site_event(str(site.id), "stage_progress", message="Validating credentials...")
-            cred_errors = await _validate_credentials(overrides)
+            cred_errors = await _validate_credentials(overrides, site.cloud_provider)
             if cred_errors:
                 warning = f"Credential warning: {'; '.join(cred_errors)}. Deploy will continue but affected features may not work. Consider fixing and redeploying."
                 logger.warning(warning)
@@ -592,7 +603,7 @@ async def rebuild_site(
         if not get_settings().is_local:
             overrides = _generate_env_overrides(site)
             await publish_site_event(str(site.id), "stage_progress", message="Validating credentials...")
-            cred_errors = await _validate_credentials(overrides)
+            cred_errors = await _validate_credentials(overrides, site.cloud_provider)
             if cred_errors:
                 warning = f"Credential warning: {'; '.join(cred_errors)}. Rebuild will continue but affected features may not work. Consider fixing and rebuilding."
                 logger.warning(warning)
