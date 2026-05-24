@@ -13,16 +13,27 @@ from server.models.site import Site, SiteStatus, SleepMode
 
 router = APIRouter(prefix="/api/costs", tags=["costs"])
 
+# AWS pricing — update periodically from https://aws.amazon.com/ec2/pricing/
 EC2_MONTHLY: dict[str, float] = {
     "t3.medium": 28.80,
     "t3.large": 57.60,
     "t3.xlarge": 180.00,
     "t3.2xlarge": 288.00,
 }
-
 EBS_MONTHLY = 4.0
 DATA_TRANSFER_MONTHLY = 2.0
 EIP_STOPPED_MONTHLY = 3.6
+
+# GCP pricing — update periodically from https://cloud.google.com/compute/pricing
+GCE_MONTHLY: dict[str, float] = {
+    "e2-medium": 24.27,
+    "e2-standard-2": 48.54,
+    "e2-standard-4": 97.09,
+    "e2-standard-8": 194.18,
+}
+GCE_DISK_MONTHLY = 3.40
+GCE_DATA_TRANSFER_MONTHLY = 1.50
+GCE_STATIC_IP_STOPPED_MONTHLY = 2.88
 
 RUNNING_ACTIONS = {"site.started", "site.created", "site.redeployed"}
 STOPPED_ACTIONS = {"site.stopped", "site.sleeping", "site.destroyed"}
@@ -38,16 +49,23 @@ BILLABLE_STATUSES = {
 }
 
 
-def _hourly_rate(instance_size: str) -> float:
-    ec2 = EC2_MONTHLY.get(instance_size, EC2_MONTHLY["t3.large"])
-    return ec2 / 30 / 24
+def _hourly_rate(instance_size: str, cloud_provider: str = "aws") -> float:
+    if cloud_provider == "gcp":
+        monthly = GCE_MONTHLY.get(instance_size, GCE_MONTHLY["e2-standard-2"])
+    else:
+        monthly = EC2_MONTHLY.get(instance_size, EC2_MONTHLY["t3.large"])
+    return monthly / 30 / 24
 
 
-def _fixed_daily_cost() -> float:
+def _fixed_daily_cost(cloud_provider: str = "aws") -> float:
+    if cloud_provider == "gcp":
+        return (GCE_DISK_MONTHLY + GCE_DATA_TRANSFER_MONTHLY) / 30
     return (EBS_MONTHLY + DATA_TRANSFER_MONTHLY) / 30
 
 
-def _eip_stopped_daily() -> float:
+def _eip_stopped_daily(cloud_provider: str = "aws") -> float:
+    if cloud_provider == "gcp":
+        return GCE_STATIC_IP_STOPPED_MONTHLY / 30
     return EIP_STOPPED_MONTHLY / 30
 
 
@@ -68,10 +86,11 @@ def _running_fraction(site: Site) -> float:
 
 
 def _daily_cost_for_site(site: Site) -> float:
+    provider = getattr(site, "cloud_provider", "aws")
     fraction = _running_fraction(site)
-    running_cost = _hourly_rate(site.instance_size) * 24 * fraction
-    eip_cost = _eip_stopped_daily() * (1 - fraction) if fraction < 1 else 0
-    return running_cost + _fixed_daily_cost() + eip_cost
+    running_cost = _hourly_rate(site.instance_size, provider) * 24 * fraction
+    eip_cost = _eip_stopped_daily(provider) * (1 - fraction) if fraction < 1 else 0
+    return running_cost + _fixed_daily_cost(provider) + eip_cost
 
 
 def _projected_end_date(site: Site) -> datetime | None:
@@ -135,9 +154,10 @@ async def _compute_historical_cost(
     running_fraction = running_seconds / total_seconds
     alive_days = total_seconds / 86400
 
-    running_cost = _hourly_rate(site.instance_size) * (running_seconds / 3600)
-    eip_stopped_cost = _eip_stopped_daily() * (1 - running_fraction) * alive_days
-    fixed_cost = _fixed_daily_cost() * alive_days
+    provider = getattr(site, "cloud_provider", "aws")
+    running_cost = _hourly_rate(site.instance_size, provider) * (running_seconds / 3600)
+    eip_stopped_cost = _eip_stopped_daily(provider) * (1 - running_fraction) * alive_days
+    fixed_cost = _fixed_daily_cost(provider) * alive_days
 
     return running_cost + eip_stopped_cost + fixed_cost
 
@@ -202,16 +222,18 @@ async def get_cost_summary(
         if site.sleep_mode != SleepMode.IDLE:
             continue
         cost = await _compute_historical_cost(db, site, lookback_start, lookback_end, all_logs)
-        full_cost = _hourly_rate(site.instance_size) * 7 * 24 + _fixed_daily_cost() * 7
+        provider = getattr(site, "cloud_provider", "aws")
+        full_cost = _hourly_rate(site.instance_size, provider) * 7 * 24 + _fixed_daily_cost(provider) * 7
         if full_cost > 0:
             idle_fractions[site.id] = min(cost / full_cost, 1.0)
 
     def _projected_daily_cost(site: Site) -> float:
+        provider = getattr(site, "cloud_provider", "aws")
         if site.sleep_mode == SleepMode.IDLE and site.id in idle_fractions:
             fraction = idle_fractions[site.id]
-            running_cost = _hourly_rate(site.instance_size) * 24 * fraction
-            eip_cost = _eip_stopped_daily() * (1 - fraction) if fraction < 1 else 0
-            return running_cost + _fixed_daily_cost() + eip_cost
+            running_cost = _hourly_rate(site.instance_size, provider) * 24 * fraction
+            eip_cost = _eip_stopped_daily(provider) * (1 - fraction) if fraction < 1 else 0
+            return running_cost + _fixed_daily_cost(provider) + eip_cost
         return _daily_cost_for_site(site)
 
     today_daily = sum(_projected_daily_cost(s) for s in active_sites)
