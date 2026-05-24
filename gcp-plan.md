@@ -457,3 +457,111 @@ GOOGLE_APPLICATION_CREDENTIALS=  # path to service account JSON key
 **Deleted files:**
 - `server/notifications/` (entire directory) — done in Phase 0
 - `server/ec2.py` (after Phase 3 confirmed working, logic lives in AWSCompute)
+
+---
+
+## Post-Implementation Setup (on Flare instance)
+
+Once all 10 phases are deployed, SSH into the Flare instance and complete the following:
+
+### 1. GCP Service Account Key
+
+Create a service account in your GCP project with these roles:
+- **Compute Admin** — create/start/stop/delete GCE instances
+- **Service Account User** — attach SAs to instances
+- **IAP-Secured Tunnel User** — SSH via IAP tunneling
+- **Storage Admin** — read/write GCS Terraform state bucket
+
+Download the JSON key file and place it on the Flare instance:
+
+```bash
+mkdir -p /opt/flare/credentials
+# scp or paste the key file here
+chmod 600 /opt/flare/credentials/gcp-sa-key.json
+```
+
+### 2. `.env` Changes
+
+Add to production `.env`:
+
+```bash
+# GCP
+GCP_PROJECT_ID=flare-observal-prod
+GCP_REGION=us-central1
+GCP_ZONE=us-central1-a
+GCP_TERRAFORM_STATE_BUCKET=flare-terraform-state-gcp
+GOOGLE_APPLICATION_CREDENTIALS=/opt/flare/credentials/gcp-sa-key.json
+```
+
+Remove (now dead):
+
+```bash
+# SES_FROM_ADDRESS=noreply@observal.io  ← delete this line
+```
+
+### 3. GCP Infrastructure Prerequisites
+
+These must exist before Flare can provision GCP sites:
+
+| Resource | How to create |
+|----------|--------------|
+| GCP project | `gcloud projects create flare-observal-prod` |
+| Enabled APIs | `gcloud services enable compute.googleapis.com iap.googleapis.com storage.googleapis.com` |
+| GCS state bucket | `gsutil mb -l us-central1 gs://flare-terraform-state-gcp` |
+| IAP enabled | Console → APIs & Services → IAP → enable |
+
+### 4. Dockerfile Changes
+
+`Dockerfile.api` needs gcloud CLI installed (after Terraform install block):
+
+```dockerfile
+RUN curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir=/opt
+ENV PATH="/opt/google-cloud-sdk/bin:${PATH}"
+```
+
+`pyproject.toml` needs:
+
+```
+google-cloud-compute>=1.15.0
+google-auth>=2.23.0
+```
+
+### 5. Docker Compose Volume Mount
+
+The SA key file must be accessible inside both `api` and `worker` containers:
+
+```yaml
+# In both api: and worker: services
+volumes:
+  - /opt/flare/credentials:/opt/flare/credentials:ro
+```
+
+### 6. Database Migration
+
+```bash
+docker compose exec api alembic -c server/alembic.ini upgrade head
+```
+
+Runs migration `0002`: adds `cloud_provider` column (defaults existing sites to `"aws"`), widens `instance_id` to VARCHAR(64).
+
+### 7. Existing AWS Setup (unchanged)
+
+Everything AWS still needs what it needed before:
+- `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
+- `TERRAFORM_STATE_BUCKET` (S3) + `TERRAFORM_LOCK_TABLE` (DynamoDB)
+- `ROUTE53_ZONE_ID` (still used for **both** AWS and GCP sites)
+
+### Setup Checklist
+
+```
+[ ] GCP project created, APIs enabled
+[ ] Service account created with 4 roles
+[ ] SA key JSON on Flare instance at known path
+[ ] GCS bucket for Terraform state created
+[ ] .env updated with GCP_* vars + GOOGLE_APPLICATION_CREDENTIALS
+[ ] SES_FROM_ADDRESS removed from .env
+[ ] Dockerfile.api rebuilt with gcloud CLI + google-cloud-* deps
+[ ] SA key volume-mounted into api + worker containers
+[ ] alembic upgrade head run
+[ ] Route53 zone ID still set (used for GCP DNS too)
+```
