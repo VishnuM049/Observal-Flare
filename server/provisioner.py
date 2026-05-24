@@ -413,10 +413,20 @@ async def destroy_site(
         except Exception:
             logger.error("Terraform destroy failed for site=%s instance_id=%s — manual cleanup may be required", site.name, site.instance_id, exc_info=True)
 
-        # Stage 3: Clean up Terraform state from S3
+        # Stage 3: Clean up Terraform state
         try:
-            s3 = boto3.client("s3", region_name=get_settings().aws_region)
-            s3.delete_object(Bucket=get_settings().terraform_state_bucket, Key=f"sites/{site.name}/terraform.tfstate")
+            settings = get_settings()
+            if site.cloud_provider == "gcp":
+                from google.cloud import storage
+                client = storage.Client()
+                bucket = client.bucket(settings.gcp_terraform_state_bucket)
+                prefix = f"sites/{site.name}/"
+                blobs = list(bucket.list_blobs(prefix=prefix))
+                for blob in blobs:
+                    blob.delete()
+            else:
+                s3 = boto3.client("s3", region_name=settings.aws_region)
+                s3.delete_object(Bucket=settings.terraform_state_bucket, Key=f"sites/{site.name}/terraform.tfstate")
         except Exception:
             logger.warning("Could not clean up Terraform state for %s", site.name)
 
