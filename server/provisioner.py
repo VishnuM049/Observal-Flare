@@ -29,12 +29,26 @@ from server.terraform import RealTerraform, TerraformRunner
 logger = logging.getLogger(__name__)
 
 
-def _get_defaults() -> tuple[TerraformRunner, SSMRunner, GitHubClient, ComputeRunner]:
+def _get_defaults(site: Site | None = None) -> tuple[TerraformRunner, SSMRunner, GitHubClient, ComputeRunner]:
     settings = get_settings()
-    tf = MockTerraform() if settings.use_mock_terraform else RealTerraform()
-    ssm = MockSSM() if settings.use_mock_ssm else RealSSM()
-    gh = MockGitHubClient() if settings.use_mock_github else RealGitHubClient()
-    compute = MockCompute() if settings.use_mock_compute else AWSCompute()
+    provider = site.cloud_provider if site else "aws"
+
+    if settings.is_local:
+        return MockTerraform(), MockSSM(), MockGitHubClient(), MockCompute()
+
+    gh = RealGitHubClient()
+
+    if provider == "gcp":
+        # GCP implementations (placeholder until Phase 4-6)
+        # For now, fall through to AWS — GCP classes will be imported here once built
+        tf = RealTerraform()
+        ssm = RealSSM()
+        compute = AWSCompute()
+    else:
+        tf = RealTerraform()
+        ssm = RealSSM()
+        compute = AWSCompute()
+
     return tf, ssm, gh, compute
 
 
@@ -284,7 +298,7 @@ async def provision_site(
     github: GitHubClient | None = None,
     compute: ComputeRunner | None = None,
 ) -> Site:
-    default_infra, default_remote, default_github, default_compute = _get_defaults()
+    default_infra, default_remote, default_github, default_compute = _get_defaults(site)
     infra = infra or default_infra
     remote = remote or default_remote
     github = github or default_github
@@ -365,7 +379,7 @@ async def destroy_site(
     infra: TerraformRunner | None = None,
     remote: SSMRunner | None = None,
 ) -> Site:
-    default_infra, default_remote, _, _ = _get_defaults()
+    default_infra, default_remote, _, _ = _get_defaults(site)
     infra = infra or default_infra
     remote = remote or default_remote
 
@@ -431,7 +445,7 @@ async def redeploy_site(
     github: GitHubClient | None = None,
     compute: ComputeRunner | None = None,
 ) -> Site:
-    _, default_remote, default_github, default_compute = _get_defaults()
+    _, default_remote, default_github, default_compute = _get_defaults(site)
     remote = remote or default_remote
     github = github or default_github
     compute = compute or default_compute
@@ -568,7 +582,7 @@ async def rebuild_site(
     compute: ComputeRunner | None = None,
 ) -> Site:
     """Rebuild containers from existing code — no git pull, just env rewrite + docker compose rebuild."""
-    _, default_remote, _, default_compute = _get_defaults()
+    _, default_remote, _, default_compute = _get_defaults(site)
     remote = remote or default_remote
     compute = compute or default_compute
 

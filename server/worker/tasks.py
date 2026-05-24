@@ -24,15 +24,21 @@ from server.worker.settings import get_redis_settings
 logger = logging.getLogger(__name__)
 
 
-def _get_remote() -> SSMRunner:
+def _get_remote(site: Site | None = None) -> SSMRunner:
     if get_settings().use_mock_ssm:
         return MockSSM()
+    # GCP remote runner will be added in Phase 5
+    # if site and site.cloud_provider == "gcp":
+    #     return GCPRemoteRunner(...)
     return RealSSM()
 
 
-def _get_compute() -> ComputeRunner:
+def _get_compute(site: Site | None = None) -> ComputeRunner:
     if get_settings().use_mock_compute:
         return MockCompute()
+    # GCP compute will be added in Phase 6
+    # if site and site.cloud_provider == "gcp":
+    #     return GCPCompute(...)
     return AWSCompute()
 
 
