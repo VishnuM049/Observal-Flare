@@ -12,7 +12,6 @@ from server.database import async_session
 from server.events import publish_site_event
 from server.models.audit_log import AuditLog
 from server.models.site import Site, SiteStatus, SleepMode
-from server.notifications.email import send_site_notification
 from server.provisioner import _wait_for_healthy, destroy_site, provision_site, rebuild_site, redeploy_site
 from server.services.site_service import audit_details, transition_status
 from server.ssm import SSMRunner
@@ -257,7 +256,6 @@ async def cron_stale_reminders(ctx: dict) -> None:
                 site.reminder_sent_at = now
                 site.scheduled_destroy_at = now + timedelta(hours=12)
                 await db.commit()
-                await send_site_notification(site, "ttl_expiring")
                 logger.info(
                     "TTL expiry: site %s scheduled for destruction in 12h (age=%dd, ttl=%dd)",
                     site.name, age_days, row.ttl_days,

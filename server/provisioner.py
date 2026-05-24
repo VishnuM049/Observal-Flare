@@ -19,7 +19,6 @@ from server.config import get_settings
 from server.events import publish_site_event
 from server.mock import MockGitHubClient, MockSSM, MockTerraform
 from server.models.site import Site, SiteStatus, SleepMode
-from server.notifications.email import send_site_notification
 from server.services.github_service import GitHubClient, RealGitHubClient
 from server.models.audit_log import AuditLog
 from server.services.site_service import audit_details, transition_status
@@ -338,8 +337,6 @@ async def provision_site(
         await db.commit()
         await publish_site_event(str(site.id), "status_change", status="running", message="Site is live")
 
-        # Stage 6: Notify
-        await send_site_notification(site, "ready")
         logger.info("Site %s provisioned successfully", site.domain)
 
     except Exception as e:
@@ -352,7 +349,6 @@ async def provision_site(
             logger.exception("Failed to persist error state for site %s", site.name)
             await db.rollback()
         await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
-        await send_site_notification(site, "failed")
         raise
 
     return site
@@ -405,7 +401,6 @@ async def destroy_site(
         await db.commit()
         await publish_site_event(str(site.id), "status_change", status="destroyed", message="Site destroyed")
 
-        await send_site_notification(site, "destroyed")
         logger.info("Site %s destroyed", site.name)
 
     except Exception as e:
@@ -522,7 +517,6 @@ $COMPOSE restart observal-lb 2>/dev/null || true
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.redeployed", details=audit_details(site, resolved_sha=sha)))
             await db.commit()
             await publish_site_event(str(site.id), "status_change", status="running", message="Redeploy complete")
-            await send_site_notification(site, "ready")
         elif site.auto_wipe_on_failure:
             # Wipe volumes and retry
             logger.warning("Site %s unhealthy after redeploy, wiping volumes", site.name)
@@ -541,7 +535,6 @@ docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-com
                 site.error_message = None
                 await db.commit()
                 await publish_site_event(str(site.id), "status_change", status="running", message="Redeploy complete (data wiped)")
-                await send_site_notification(site, "ready_after_wipe")
             else:
                 raise RuntimeError("Site unhealthy after wipe and retry")
         else:
@@ -557,7 +550,6 @@ docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-com
             logger.exception("Failed to persist error state for site %s", site.name)
             await db.rollback()
         await publish_site_event(str(site.id), "error", status="failed", message=str(e)[:200])
-        await send_site_notification(site, "failed")
         raise
 
     return site

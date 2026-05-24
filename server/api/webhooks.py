@@ -13,7 +13,6 @@ from server.api.deps import DB
 from server.api.sites import _get_pool
 from server.config import get_settings
 from server.models.site import DeployType, Site, SiteStatus
-from server.notifications.email import send_site_notification
 
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 logger = logging.getLogger(__name__)
@@ -119,9 +118,6 @@ async def _handle_pull_request(db: DB, payload: dict) -> dict:
             logger.info("PR closed: warning set on site %s (PR #%s)", site.name, pr_number)
 
         await db.commit()
-
-        for site in sites:
-            await send_site_notification(site, "pr_closed")
 
         return {"action": "closed", "matched": len(sites), "pr": pr_number}
 

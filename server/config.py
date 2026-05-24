@@ -45,9 +45,6 @@ class Settings(BaseSettings):
     route53_zone_id: str = ""
     site_base_domain: str = "observal.io"
 
-    # Email (SES)
-    ses_from_address: str = "noreply@observal.io"
-
     # Flare public URL
     flare_base_url: str = "https://flare.observal.io"
 
