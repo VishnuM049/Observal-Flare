@@ -385,7 +385,7 @@ async def destroy_site(
         try:
             await infra.destroy(site_name=site.name)
         except Exception:
-            logger.warning("Terraform destroy failed for %s (state may not exist)", site.name)
+            logger.error("Terraform destroy failed for site=%s instance_id=%s — manual cleanup may be required", site.name, site.instance_id, exc_info=True)
 
         # Stage 3: Clean up Terraform state from S3
         try:
