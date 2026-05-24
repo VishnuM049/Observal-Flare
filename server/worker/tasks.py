@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 def _get_remote(site: Site | None = None) -> SSMRunner:
     if get_settings().use_mock_ssm:
         return MockSSM()
-    # GCP remote runner will be added in Phase 5
-    # if site and site.cloud_provider == "gcp":
-    #     return GCPRemoteRunner(...)
+    if site and site.cloud_provider == "gcp":
+        from server.gcp_remote import GCPRemoteRunner
+        return GCPRemoteRunner()
     return RealSSM()
 
 

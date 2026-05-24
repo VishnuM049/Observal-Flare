@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.compute import AWSCompute, ComputeRunner, MockCompute
 from server.config import get_settings
 from server.events import publish_site_event
+from server.gcp_remote import GCPRemoteRunner
 from server.gcp_terraform import GCPTerraform
 from server.mock import MockGitHubClient, MockSSM, MockTerraform
 from server.models.site import Site, SiteStatus, SleepMode
@@ -41,8 +42,8 @@ def _get_defaults(site: Site | None = None) -> tuple[TerraformRunner, SSMRunner,
 
     if provider == "gcp":
         tf = GCPTerraform()
-        # GCP remote + compute will be added in Phase 5-6
-        ssm = RealSSM()
+        ssm = GCPRemoteRunner()
+        # GCP compute will be added in Phase 6
         compute = AWSCompute()
     else:
         tf = RealTerraform()
