@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { DeployType, SleepMode } from "@/lib/types";
+import type { CloudProvider, DeployType, SleepMode } from "@/lib/types";
 import { sites } from "@/lib/api-client";
 import { estimateDailyCost, formatDailyCost } from "@/lib/cost-estimate";
 import { DeploySourcePicker } from "./deploy-source-picker";
@@ -12,6 +12,7 @@ import { SelectField } from "./select-field";
 export function SiteForm() {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [cloudProvider, setCloudProvider] = useState<CloudProvider>("aws");
   const [deployType, setDeployType] = useState<DeployType>("branch");
   const [deployRef, setDeployRef] = useState("");
   const [requestorEmail, setRequestorEmail] = useState("");
@@ -40,6 +41,7 @@ export function SiteForm() {
     try {
       const site = await sites.create({
         name,
+        cloud_provider: cloudProvider,
         deploy_type: deployType,
         deploy_ref: deployRef,
         requestor_email: requestorEmail,
@@ -72,6 +74,21 @@ export function SiteForm() {
       <section>
         <h2 className="section-label mb-4">Basic Info</h2>
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Cloud Provider</label>
+            <SelectField
+              value={cloudProvider}
+              onChange={(v) => {
+                setCloudProvider(v as CloudProvider);
+                setInstanceSize(v === "gcp" ? "e2-standard-2" : "t3.large");
+              }}
+              options={[
+                { value: "aws", label: "AWS" },
+                { value: "gcp", label: "GCP" },
+              ]}
+            />
+          </div>
+
           <div>
             <label className="block text-sm font-medium mb-1">Site Name <span style={{ color: "var(--color-danger)" }}>*</span></label>
             <input
@@ -115,7 +132,12 @@ export function SiteForm() {
             <SelectField
               value={instanceSize}
               onChange={setInstanceSize}
-              options={[
+              options={cloudProvider === "gcp" ? [
+                { value: "e2-medium", label: "e2-medium — 2 vCPU, 4 GB (~$0.81/day)" },
+                { value: "e2-standard-2", label: "e2-standard-2 — 2 vCPU, 8 GB (~$1.62/day)" },
+                { value: "e2-standard-4", label: "e2-standard-4 — 4 vCPU, 16 GB (~$3.24/day)" },
+                { value: "e2-standard-8", label: "e2-standard-8 — 8 vCPU, 32 GB (~$6.47/day)" },
+              ] : [
                 { value: "t3.medium", label: "t3.medium — 2 vCPU, 4 GB (~$0.96/day)" },
                 { value: "t3.large", label: "t3.large — 2 vCPU, 8 GB (~$1.92/day)" },
                 { value: "t3.xlarge", label: "t3.xlarge — 4 vCPU, 16 GB (~$6.00/day)" },
@@ -207,11 +229,11 @@ export function SiteForm() {
           <div className="card px-4 py-3 text-sm">
             <span style={{ color: "var(--color-ink-muted)" }}>Estimated cost: </span>
             <span className="font-medium">
-              {formatDailyCost(estimateDailyCost(instanceSize, sleepMode, sleepAtHour, wakeAtHour, idleTimeoutMinutes))}
+              {formatDailyCost(estimateDailyCost(instanceSize, sleepMode, sleepAtHour, wakeAtHour, idleTimeoutMinutes, cloudProvider))}
             </span>
             {ttlDays && (
               <span className="ml-2" style={{ color: "var(--color-ink-muted)" }}>
-                (~${(estimateDailyCost(instanceSize, sleepMode, sleepAtHour, wakeAtHour, idleTimeoutMinutes) * ttlDays).toFixed(2)} total for {ttlDays} day{ttlDays > 1 ? "s" : ""})
+                (~${(estimateDailyCost(instanceSize, sleepMode, sleepAtHour, wakeAtHour, idleTimeoutMinutes, cloudProvider) * ttlDays).toFixed(2)} total for {ttlDays} day{ttlDays > 1 ? "s" : ""})
               </span>
             )}
           </div>

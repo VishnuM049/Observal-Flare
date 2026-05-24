@@ -348,6 +348,9 @@ export default function SiteDetailPage() {
           <div>
             <dt className="section-label">Instance</dt>
             <dd className="mt-1 font-mono text-xs">
+              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase mr-2" style={{ backgroundColor: site.cloud_provider === "gcp" ? "#e8f0fe" : "#fef3e8", color: site.cloud_provider === "gcp" ? "#1a73e8" : "#c97a2e" }}>
+                {site.cloud_provider}
+              </span>
               {site.instance_size}
               {site.ip_address && <span className="ml-2" style={{ color: "var(--color-ink-muted)" }}>{site.ip_address}</span>}
             </dd>
@@ -392,7 +395,7 @@ export default function SiteDetailPage() {
           </div>
           <div>
             <dt className="section-label">Est. Cost</dt>
-            <dd className="mt-1 font-medium">{formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode, site.sleep_at_hour, site.wake_at_hour, site.idle_timeout_minutes))}</dd>
+            <dd className="mt-1 font-medium">{formatDailyCost(estimateDailyCost(site.instance_size, site.sleep_mode, site.sleep_at_hour, site.wake_at_hour, site.idle_timeout_minutes, site.cloud_provider))}</dd>
           </div>
           <div>
             <dt className="section-label">Created</dt>

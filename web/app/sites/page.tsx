@@ -41,7 +41,7 @@ export default function SitesPage() {
   const runningCount = siteList.filter((s) => s.status === "running").length;
   const stoppedCount = siteList.filter((s) => s.status === "stopped" || s.status === "sleeping").length;
   const destroyableCount = siteList.filter((s) => !["destroying", "destroyed"].includes(s.status)).length;
-  const totalDaily = siteList.reduce((sum, s) => sum + estimateDailyCost(s.instance_size, s.sleep_mode, s.sleep_at_hour, s.wake_at_hour, s.idle_timeout_minutes), 0);
+  const totalDaily = siteList.reduce((sum, s) => sum + estimateDailyCost(s.instance_size, s.sleep_mode, s.sleep_at_hour, s.wake_at_hour, s.idle_timeout_minutes, s.cloud_provider), 0);
 
   const bulkConfig = {
     stop: {
