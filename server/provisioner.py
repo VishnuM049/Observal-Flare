@@ -15,6 +15,7 @@ import boto3
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.compute import AWSCompute, ComputeRunner, MockCompute
 from server.config import get_settings
 from server.events import publish_site_event
 from server.mock import MockGitHubClient, MockSSM, MockTerraform
@@ -28,12 +29,13 @@ from server.terraform import RealTerraform, TerraformRunner
 logger = logging.getLogger(__name__)
 
 
-def _get_defaults() -> tuple[TerraformRunner, SSMRunner, GitHubClient]:
+def _get_defaults() -> tuple[TerraformRunner, SSMRunner, GitHubClient, ComputeRunner]:
     settings = get_settings()
     tf = MockTerraform() if settings.use_mock_terraform else RealTerraform()
     ssm = MockSSM() if settings.use_mock_ssm else RealSSM()
     gh = MockGitHubClient() if settings.use_mock_github else RealGitHubClient()
-    return tf, ssm, gh
+    compute = MockCompute() if settings.use_mock_compute else AWSCompute()
+    return tf, ssm, gh, compute
 
 
 def _generate_env_overrides(site: Site) -> dict[str, str]:
@@ -280,11 +282,13 @@ async def provision_site(
     infra: TerraformRunner | None = None,
     remote: SSMRunner | None = None,
     github: GitHubClient | None = None,
+    compute: ComputeRunner | None = None,
 ) -> Site:
-    default_infra, default_remote, default_github = _get_defaults()
+    default_infra, default_remote, default_github, default_compute = _get_defaults()
     infra = infra or default_infra
     remote = remote or default_remote
     github = github or default_github
+    compute = compute or default_compute
 
     try:
         # Stage 0: Validate credentials (warn but don't block)
@@ -361,7 +365,7 @@ async def destroy_site(
     infra: TerraformRunner | None = None,
     remote: SSMRunner | None = None,
 ) -> Site:
-    default_infra, default_remote, _ = _get_defaults()
+    default_infra, default_remote, _, _ = _get_defaults()
     infra = infra or default_infra
     remote = remote or default_remote
 
@@ -425,10 +429,12 @@ async def redeploy_site(
     infra: TerraformRunner | None = None,
     remote: SSMRunner | None = None,
     github: GitHubClient | None = None,
+    compute: ComputeRunner | None = None,
 ) -> Site:
-    default_infra, default_remote, default_github = _get_defaults()
+    _, default_remote, default_github, default_compute = _get_defaults()
     remote = remote or default_remote
     github = github or default_github
+    compute = compute or default_compute
 
     try:
         # Stage 0: Validate credentials (warn but don't block)
@@ -442,13 +448,12 @@ async def redeploy_site(
                 site.error_message = warning
                 await publish_site_event(str(site.id), "stage_progress", message=warning)
 
-        # Ensure EC2 is running (handles sleeping, stopped, failed, or mid-transition states)
+        # Ensure instance is running (handles sleeping, stopped, failed, or mid-transition states)
         if not get_settings().is_local and site.instance_id:
-            from server.ec2 import start_ec2_instance, _get_client, _get_instance_state
-            ec2_state = await _get_instance_state(_get_client(), site.instance_id)
-            if ec2_state != "running":
-                await publish_site_event(str(site.id), "stage_progress", message="Starting EC2 instance...")
-                await start_ec2_instance(site.instance_id)
+            state = await compute.get_state(site.instance_id)
+            if state != "running":
+                await publish_site_event(str(site.id), "stage_progress", message="Starting instance...")
+                await compute.start(site.instance_id)
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             if site.status in (SiteStatus.SLEEPING, SiteStatus.STOPPED):
                 site.status = SiteStatus.RUNNING
@@ -560,10 +565,12 @@ async def rebuild_site(
     site: Site,
     *,
     remote: SSMRunner | None = None,
+    compute: ComputeRunner | None = None,
 ) -> Site:
     """Rebuild containers from existing code — no git pull, just env rewrite + docker compose rebuild."""
-    default_infra, default_remote, _ = _get_defaults()
+    _, default_remote, _, default_compute = _get_defaults()
     remote = remote or default_remote
+    compute = compute or default_compute
 
     try:
         # Stage 0: Validate credentials (warn but don't block)
@@ -577,13 +584,12 @@ async def rebuild_site(
                 site.error_message = warning
                 await publish_site_event(str(site.id), "stage_progress", message=warning)
 
-        # Ensure EC2 is running
+        # Ensure instance is running
         if not get_settings().is_local and site.instance_id:
-            from server.ec2 import start_ec2_instance, _get_client, _get_instance_state
-            ec2_state = await _get_instance_state(_get_client(), site.instance_id)
-            if ec2_state != "running":
-                await publish_site_event(str(site.id), "stage_progress", message="Starting EC2 instance...")
-                await start_ec2_instance(site.instance_id)
+            state = await compute.get_state(site.instance_id)
+            if state != "running":
+                await publish_site_event(str(site.id), "stage_progress", message="Starting instance...")
+                await compute.start(site.instance_id)
 
         transition_status(site, SiteStatus.DEPLOYING)
         await db.commit()

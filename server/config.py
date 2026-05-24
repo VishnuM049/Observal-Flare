@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     mock_github: bool | None = None
     mock_terraform: bool | None = None
     mock_ssm: bool | None = None
+    mock_compute: bool | None = None
 
     @property
     def is_local(self) -> bool:
@@ -68,6 +69,10 @@ class Settings(BaseSettings):
     @property
     def use_mock_ssm(self) -> bool:
         return self.mock_ssm if self.mock_ssm is not None else self.is_local
+
+    @property
+    def use_mock_compute(self) -> bool:
+        return self.mock_compute if self.mock_compute is not None else self.is_local
 
 
 @lru_cache

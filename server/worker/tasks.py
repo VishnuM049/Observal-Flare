@@ -14,10 +14,10 @@ from server.models.audit_log import AuditLog
 from server.models.site import Site, SiteStatus, SleepMode
 from server.provisioner import _wait_for_healthy, destroy_site, provision_site, rebuild_site, redeploy_site
 from server.services.site_service import audit_details, transition_status
+from server.compute import AWSCompute, ComputeRunner, MockCompute
 from server.ssm import SSMRunner
 from server.mock import MockSSM
 from server.config import get_settings
-from server.ec2 import start_ec2_instance, stop_ec2_instance
 from server.ssm import RealSSM
 from server.worker.settings import get_redis_settings
 
@@ -28,6 +28,12 @@ def _get_remote() -> SSMRunner:
     if get_settings().use_mock_ssm:
         return MockSSM()
     return RealSSM()
+
+
+def _get_compute() -> ComputeRunner:
+    if get_settings().use_mock_compute:
+        return MockCompute()
+    return AWSCompute()
 
 
 async def task_provision_site(ctx: dict, site_id: str) -> None:
@@ -78,6 +84,7 @@ async def task_rebuild_site(ctx: dict, site_id: str) -> None:
 
 async def task_stop_site(ctx: dict, site_id: str) -> None:
     remote = _get_remote()
+    compute = _get_compute()
     async with async_session() as db:
         site = await db.get(Site, uuid.UUID(site_id))
         if site is None:
@@ -89,7 +96,7 @@ async def task_stop_site(ctx: dict, site_id: str) -> None:
 
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
             if not get_settings().is_local:
-                await stop_ec2_instance(site.instance_id)
+                await compute.stop(site.instance_id)
 
             site.status = SiteStatus.STOPPED
             db.add(AuditLog(user_id=site.created_by, site_id=site.id, action="site.stopped", details=audit_details(site)))
@@ -106,6 +113,7 @@ async def task_stop_site(ctx: dict, site_id: str) -> None:
 
 async def task_start_site(ctx: dict, site_id: str) -> None:
     remote = _get_remote()
+    compute = _get_compute()
     async with async_session() as db:
         site = await db.get(Site, uuid.UUID(site_id))
         if site is None:
@@ -113,7 +121,7 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
         try:
             if not get_settings().is_local:
                 await publish_site_event(site_id, "stage_progress", message="Starting EC2 instance...")
-                await start_ec2_instance(site.instance_id)
+                await compute.start(site.instance_id)
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             # Warm-up request to create an lb log entry so the idle cron doesn't immediately sleep the site
             await remote.run_command(site.instance_id, f"curl -sf -o /dev/null https://{site.domain}/ || true", timeout_seconds=30)
@@ -136,8 +144,9 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
 
 
 async def task_sleep_site(ctx: dict, site_id: str) -> None:
-    """Stop containers and EC2 instance, mark site as sleeping (used by idle detection)."""
+    """Stop containers and instance, mark site as sleeping (used by idle detection)."""
     remote = _get_remote()
+    compute = _get_compute()
     async with async_session() as db:
         site = await db.get(Site, uuid.UUID(site_id))
         if site is None:
@@ -151,7 +160,7 @@ async def task_sleep_site(ctx: dict, site_id: str) -> None:
 
             await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
             if not get_settings().is_local:
-                await stop_ec2_instance(site.instance_id)
+                await compute.stop(site.instance_id)
             await db.commit()
             logger.info("Idle sleep: site %s now sleeping", site.name)
         except Exception as e:
@@ -166,6 +175,7 @@ async def cron_nightly_sleep(ctx: dict) -> None:
     """Sleep/wake nightly sites based on per-site sleep_at_hour and wake_at_hour. Runs hourly."""
     current_hour = datetime.now(timezone.utc).hour
     is_local = get_settings().is_local
+    compute = _get_compute()
 
     async with async_session() as db:
         result = await db.execute(
@@ -187,14 +197,14 @@ async def cron_nightly_sleep(ctx: dict) -> None:
                 if site.status == SiteStatus.RUNNING and site.sleep_at_hour == current_hour:
                     await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
                     if not is_local:
-                        await stop_ec2_instance(site.instance_id)
+                        await compute.stop(site.instance_id)
                     site.status = SiteStatus.SLEEPING
                     await db.commit()
                     await publish_site_event(str(site_id), "status_change", status="sleeping", message="Nightly sleep")
                     logger.info("Nightly sleep: site %s now sleeping", site.name)
                 elif site.status == SiteStatus.SLEEPING and site.wake_at_hour == current_hour:
                     if not is_local:
-                        await start_ec2_instance(site.instance_id)
+                        await compute.start(site.instance_id)
                     await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
                     site.status = SiteStatus.RUNNING
                     await db.commit()
