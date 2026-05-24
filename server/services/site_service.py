@@ -17,7 +17,10 @@ SLUG_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 DEPLOY_REF_RE = re.compile(r"^[a-zA-Z0-9._/\-]+$")
 ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-VALID_INSTANCE_SIZES = frozenset({"t3.medium", "t3.large", "t3.xlarge", "t3.2xlarge"})
+VALID_INSTANCE_SIZES = frozenset({
+    "t3.medium", "t3.large", "t3.xlarge", "t3.2xlarge",
+    "e2-medium", "e2-standard-2", "e2-standard-4", "e2-standard-8",
+})
 
 RESERVED_ENV_KEYS = frozenset({
     "DATABASE_URL",

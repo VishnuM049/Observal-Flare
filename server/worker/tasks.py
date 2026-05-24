@@ -100,7 +100,7 @@ async def task_stop_site(ctx: dict, site_id: str) -> None:
             await db.commit()
             await publish_site_event(site_id, "status_change", status="stopping", message="Stopping site...")
 
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
             if not get_settings().is_local:
                 await compute.stop(site.instance_id)
 
@@ -128,7 +128,7 @@ async def task_start_site(ctx: dict, site_id: str) -> None:
             if not get_settings().is_local:
                 await publish_site_event(site_id, "stage_progress", message="Starting EC2 instance...")
                 await compute.start(site.instance_id)
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             # Warm-up request to create an lb log entry so the idle cron doesn't immediately sleep the site
             await remote.run_command(site.instance_id, f"curl -sf -o /dev/null https://{site.domain}/ || true", timeout_seconds=30)
             await publish_site_event(site_id, "stage_progress", message="Waiting for health check...")
@@ -164,7 +164,7 @@ async def task_sleep_site(ctx: dict, site_id: str) -> None:
             await db.commit()
             await publish_site_event(site_id, "status_change", status="sleeping", message="Site going to sleep")
 
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
             if not get_settings().is_local:
                 await compute.stop(site.instance_id)
             await db.commit()
@@ -201,7 +201,7 @@ async def cron_nightly_sleep(ctx: dict) -> None:
                     continue
 
                 if site.status == SiteStatus.RUNNING and site.sleep_at_hour == current_hour:
-                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
+                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml down")
                     if not is_local:
                         await compute.stop(site.instance_id)
                     site.status = SiteStatus.SLEEPING
@@ -211,7 +211,7 @@ async def cron_nightly_sleep(ctx: dict) -> None:
                 elif site.status == SiteStatus.SLEEPING and site.wake_at_hour == current_hour:
                     if not is_local:
                         await compute.start(site.instance_id)
-                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
+                    await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
                     site.status = SiteStatus.RUNNING
                     await db.commit()
                     await publish_site_event(str(site_id), "status_change", status="running", message="Nightly wake")
