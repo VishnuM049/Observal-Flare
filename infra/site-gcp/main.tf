@@ -59,8 +59,9 @@ resource "google_compute_instance" "site" {
 
   metadata_startup_script = <<-EOF
     #!/bin/bash
-    apt-get update && apt-get install -y docker.io docker-compose-v2 docker-buildx
+    apt-get update && apt-get install -y docker.io docker-compose-v2 docker-buildx certbot git
     systemctl enable docker && systemctl start docker
+    touch /var/run/flare-startup-complete
   EOF
 
   tags = ["flare-site", "http-server", "https-server"]

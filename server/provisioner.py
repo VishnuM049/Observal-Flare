@@ -230,11 +230,15 @@ exec > >(tee /var/log/flare-deploy.log) 2>&1
 
 echo "=== Flare deploy for {site.domain} at {sha} ==="
 
-# Wait for any running apt/dpkg processes to finish (startup script may still be running)
-while fuser /var/lib/dpkg/lock-frontend &>/dev/null; do
-    echo "Waiting for dpkg lock..."
+# Wait for startup script to finish (GCP instances run metadata_startup_script on boot)
+echo "Waiting for instance startup script to complete..."
+for i in $(seq 1 60); do
+    [ -f /var/run/flare-startup-complete ] && break
     sleep 5
 done
+if [ ! -f /var/run/flare-startup-complete ]; then
+    echo "WARNING: Startup script marker not found after 5 min, proceeding anyway"
+fi
 
 # Install Docker if needed
 if ! command -v docker &>/dev/null; then

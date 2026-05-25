@@ -72,6 +72,8 @@ class GCPRemoteRunner(SSMRunner):
                 f"--zone={self._zone}",
                 "--tunnel-through-iap",
                 "--quiet",
+                "--ssh-flag=-o ServerAliveInterval=30",
+                "--ssh-flag=-o ServerAliveCountMax=10",
                 "--command", "sudo bash /tmp/flare-remote-script.sh && rm -f /tmp/flare-remote-script.sh",
             ]
 
