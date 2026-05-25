@@ -16,6 +16,8 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/flare
       REDIS_URL: redis://localhost:6379
+      GOOGLE_APPLICATION_CREDENTIALS: /etc/flare/gcp-credentials.json
+      CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: /etc/flare/gcp-credentials.json
     volumes:
       - /etc/flare:/etc/flare:ro
     restart: unless-stopped
