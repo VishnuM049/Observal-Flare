@@ -58,7 +58,7 @@ class GCPRemoteRunner(SSMRunner):
             scp_cmd = [
                 "gcloud", "compute", "scp",
                 script_path,
-                f"{instance_id}:/tmp/flare-remote-script.sh",
+                f"root@{instance_id}:/tmp/flare-remote-script.sh",
                 f"--project={self._project}",
                 f"--zone={self._zone}",
                 "--tunnel-through-iap",
@@ -67,7 +67,7 @@ class GCPRemoteRunner(SSMRunner):
 
             exec_cmd = [
                 "gcloud", "compute", "ssh",
-                instance_id,
+                f"root@{instance_id}",
                 f"--project={self._project}",
                 f"--zone={self._zone}",
                 "--tunnel-through-iap",
