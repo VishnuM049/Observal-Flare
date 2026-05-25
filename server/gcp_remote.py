@@ -20,8 +20,20 @@ class GCPRemoteRunner(SSMRunner):
         self._project = project or settings.gcp_project_id
         self._zone = zone or settings.gcp_zone
 
+    async def _ensure_auth(self) -> None:
+        """Activate gcloud credentials (workaround for gcloud SSH crash with env-var-only auth)."""
+        proc = await asyncio.create_subprocess_exec(
+            "gcloud", "auth", "login",
+            "--cred-file=/etc/flare/gcp-credentials.json",
+            "--quiet",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+
     async def run_command(self, instance_id: str, script: str, timeout_seconds: int = 600) -> CommandResult:
         # instance_id is the GCE instance name for GCP sites
+        await self._ensure_auth()
         script_file = None
         try:
             # Write script to temp file

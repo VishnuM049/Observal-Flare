@@ -101,8 +101,19 @@ class GCPCompute:
             await asyncio.sleep(5)
         raise RuntimeError(f"GCE instance {instance_id} did not reach {target} state within {timeout_seconds}s")
 
+    async def _ensure_auth(self) -> None:
+        proc = await asyncio.create_subprocess_exec(
+            "gcloud", "auth", "login",
+            "--cred-file=/etc/flare/gcp-credentials.json",
+            "--quiet",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await proc.communicate()
+
     async def _wait_for_ssh(self, instance_id: str, timeout_seconds: int = 180) -> None:
         """Wait until gcloud compute ssh via IAP is reachable."""
+        await self._ensure_auth()
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
         while loop.time() < deadline:
