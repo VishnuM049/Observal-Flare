@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install Terraform + gcloud CLI
-RUN apt-get update && apt-get install -y --no-install-recommends curl unzip gnupg \
+RUN apt-get update && apt-get install -y --no-install-recommends curl unzip gnupg openssh-client \
     && curl -fsSL https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_$(dpkg --print-architecture).zip -o /tmp/terraform.zip \
     && unzip /tmp/terraform.zip -d /usr/local/bin/ \
     && rm /tmp/terraform.zip \
