@@ -118,7 +118,7 @@ class GCPCompute:
         deadline = loop.time() + timeout_seconds
         while loop.time() < deadline:
             proc = await asyncio.create_subprocess_exec(
-                "gcloud", "compute", "ssh", f"root@{instance_id}",
+                "gcloud", "compute", "ssh", instance_id,
                 f"--project={self._project}",
                 f"--zone={self._zone}",
                 "--tunnel-through-iap",
