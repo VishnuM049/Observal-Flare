@@ -343,7 +343,11 @@ async def provision_site(
         await db.commit()
         await publish_site_event(str(site.id), "stage_progress", message="Infrastructure provisioned")
 
-        # Stage 3: Deploy application
+        # Stage 3: Wait for instance to be SSH-ready
+        await publish_site_event(str(site.id), "stage_progress", message="Waiting for instance SSH...")
+        await compute.start(result.instance_id)
+
+        # Stage 4: Deploy application
         transition_status(site, SiteStatus.DEPLOYING)
         await db.commit()
         await publish_site_event(str(site.id), "status_change", status="deploying", message="Deploying application...")
@@ -353,14 +357,14 @@ async def provision_site(
             logger.warning("Deploy script exited non-zero for %s: %s", site.name, cmd_result.output[:500])
             site.provision_log = cmd_result.output[:2000]
 
-        # Stage 4: Wait for healthy (always runs — script exit code is unreliable)
+        # Stage 5: Wait for healthy (always runs — script exit code is unreliable)
         await publish_site_event(str(site.id), "stage_progress", message="Waiting for health check...")
         healthy = await _wait_for_healthy(site)
         if not healthy:
             script_hint = f" (deploy script also failed: {cmd_result.output[:200]})" if cmd_result.status != "success" else ""
             raise RuntimeError(f"Site {site.domain} did not become healthy within timeout{script_hint}")
 
-        # Stage 5: Success
+        # Stage 6: Success
         transition_status(site, SiteStatus.RUNNING)
         site.last_deployed_at = datetime.now(timezone.utc)
         site.error_message = None
