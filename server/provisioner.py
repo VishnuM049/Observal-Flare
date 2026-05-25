@@ -232,8 +232,11 @@ echo "=== Flare deploy for {site.domain} at {sha} ==="
 
 # Install Docker if needed
 if ! command -v docker &>/dev/null; then
-    apt-get update && apt-get install -y docker.io docker-compose-v2
+    apt-get update && apt-get install -y docker.io docker-compose-v2 docker-buildx
     systemctl enable docker && systemctl start docker
+fi
+if ! docker buildx version &>/dev/null; then
+    apt-get update && apt-get install -y docker-buildx
 fi
 
 # Clone repo

@@ -59,7 +59,7 @@ resource "google_compute_instance" "site" {
 
   metadata_startup_script = <<-EOF
     #!/bin/bash
-    apt-get update && apt-get install -y docker.io docker-compose-v2
+    apt-get update && apt-get install -y docker.io docker-compose-v2 docker-buildx
     systemctl enable docker && systemctl start docker
   EOF
 
