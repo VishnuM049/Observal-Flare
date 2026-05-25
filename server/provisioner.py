@@ -65,7 +65,6 @@ def _generate_env_overrides(site: Site) -> dict[str, str]:
         "POSTGRES_PASSWORD": "postgres",
         "CLICKHOUSE_USER": "default",
         "CLICKHOUSE_PASSWORD": "clickhouse",
-        "DEPLOYMENT_MODE": "enterprise",
     }
     overrides.update(site.env_overrides or {})
     return overrides
