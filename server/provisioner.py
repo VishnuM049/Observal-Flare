@@ -230,6 +230,12 @@ exec > >(tee /var/log/flare-deploy.log) 2>&1
 
 echo "=== Flare deploy for {site.domain} at {sha} ==="
 
+# Wait for any running apt/dpkg processes to finish (startup script may still be running)
+while fuser /var/lib/dpkg/lock-frontend &>/dev/null; do
+    echo "Waiting for dpkg lock..."
+    sleep 5
+done
+
 # Install Docker if needed
 if ! command -v docker &>/dev/null; then
     apt-get update && apt-get install -y docker.io docker-compose-v2 docker-buildx
