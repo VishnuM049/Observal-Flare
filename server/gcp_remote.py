@@ -75,21 +75,31 @@ class GCPRemoteRunner(SSMRunner):
                 "--command", "bash /tmp/flare-remote-script.sh && rm -f /tmp/flare-remote-script.sh",
             ]
 
-            # SCP the script
+            # SCP the script (retry up to 3 times — IAP tunnel can be flaky on new instances)
             logger.info("GCP: uploading script to %s", instance_id)
-            proc = await asyncio.create_subprocess_exec(
-                *scp_cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
-            except asyncio.TimeoutError:
-                proc.kill()
-                return CommandResult(status="timeout", output="SCP timed out uploading script")
+            scp_error = ""
+            for attempt in range(3):
+                proc = await asyncio.create_subprocess_exec(
+                    *scp_cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    scp_error = "SCP timed out uploading script"
+                    await asyncio.sleep(10)
+                    continue
 
-            if proc.returncode != 0:
-                return CommandResult(status="failed", output=f"SCP failed: {stderr.decode()}")
+                if proc.returncode == 0:
+                    break
+                scp_error = f"SCP failed: {stderr.decode()}"
+                if attempt < 2:
+                    logger.info("GCP: SCP attempt %d failed, retrying in 10s...", attempt + 1)
+                    await asyncio.sleep(10)
+            else:
+                return CommandResult(status="failed", output=scp_error)
 
             # Execute the script
             logger.info("GCP: executing script on %s", instance_id)

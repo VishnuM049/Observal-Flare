@@ -343,8 +343,9 @@ async def provision_site(
         await db.commit()
         await publish_site_event(str(site.id), "stage_progress", message="Infrastructure provisioned")
 
-        # Stage 3: Wait for instance to be SSH-ready
+        # Stage 3: Wait for instance to be SSH-ready (new instances need time for IAP registration)
         await publish_site_event(str(site.id), "stage_progress", message="Waiting for instance SSH...")
+        await asyncio.sleep(30)
         await compute.start(result.instance_id)
 
         # Stage 4: Deploy application
