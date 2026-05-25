@@ -464,20 +464,46 @@ GOOGLE_APPLICATION_CREDENTIALS=  # path to service account JSON key
 
 Once all 10 phases are deployed, SSH into the Flare instance and complete the following:
 
-### 1. GCP Service Account Key
+### 1. GCP Authentication (Workload Identity Federation)
 
-Create a service account in your GCP project with these roles:
-- **Compute Admin** — create/start/stop/delete GCE instances
-- **Service Account User** — attach SAs to instances
-- **IAP-Secured Tunnel User** — SSH via IAP tunneling
-- **Storage Admin** — read/write GCS Terraform state bucket
+We use Workload Identity Federation (WIF) instead of static SA keys. Flare's EC2 instance
+proves its identity to GCP via its AWS IAM role — no long-lived secrets to rotate.
 
-Download the JSON key file and place it on the Flare instance:
+**How it works at runtime:**
+```
+Flare (on EC2)
+  → Gets AWS STS token from EC2 instance metadata (via IAM role)
+  → Sends it to GCP STS endpoint
+  → GCP validates it against the Workload Identity Pool
+  → GCP issues a short-lived access token for flare-provisioner SA
+  → Flare uses that token to call Compute Engine / Storage APIs
+```
+
+**What the GCP admin set up (already done):**
+- GCP project with billing (credits) linked
+- APIs enabled: Compute Engine, IAM, IAP, Cloud Storage
+- Service account `flare-provisioner` with roles: Compute Admin, Service Account User, IAP-Secured Tunnel User, Storage Admin
+- Workload Identity Pool `flare-aws-pool` with AWS provider (our account ID)
+- Pool granted access to impersonate `flare-provisioner`
+- Credential config JSON downloaded
+
+**What we did on the AWS side (already done):**
+- IAM role `flare-ec2-identity` created (no AWS permissions needed, just an identity)
+- Role attached to the EC2 instance where Flare runs
+
+**Deploy the credential config on EC2:**
 
 ```bash
-mkdir -p /opt/flare/credentials
-# scp or paste the key file here
-chmod 600 /opt/flare/credentials/gcp-sa-key.json
+sudo mkdir -p /etc/flare
+sudo nano /etc/flare/gcp-credentials.json
+# Paste the WIF credential config JSON (type: "external_account")
+```
+
+**Verify from EC2 host:**
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/etc/flare/gcp-credentials.json
+gcloud auth login --cred-file=/etc/flare/gcp-credentials.json
+gcloud compute instances list --project=<project-id>
 ```
 
 ### 2. `.env` Changes
@@ -486,11 +512,11 @@ Add to production `.env`:
 
 ```bash
 # GCP
-GCP_PROJECT_ID=flare-observal-prod
+GCP_PROJECT_ID=<project-id-from-admin>
 GCP_REGION=us-central1
 GCP_ZONE=us-central1-a
-GCP_TERRAFORM_STATE_BUCKET=flare-terraform-state-gcp
-GOOGLE_APPLICATION_CREDENTIALS=/opt/flare/credentials/gcp-sa-key.json
+GCP_TERRAFORM_STATE_BUCKET=<bucket-name-from-admin>
+GOOGLE_APPLICATION_CREDENTIALS=/etc/flare/gcp-credentials.json
 ```
 
 Remove (now dead):
@@ -501,39 +527,36 @@ Remove (now dead):
 
 ### 3. GCP Infrastructure Prerequisites
 
-These must exist before Flare can provision GCP sites:
+These must exist before Flare can provision GCP sites (confirm with admin):
 
-| Resource | How to create |
+| Resource | How to verify |
 |----------|--------------|
-| GCP project | `gcloud projects create flare-observal-prod` |
-| Enabled APIs | `gcloud services enable compute.googleapis.com iap.googleapis.com storage.googleapis.com` |
-| GCS state bucket | `gsutil mb -l us-central1 gs://flare-terraform-state-gcp` |
-| IAP enabled | Console → APIs & Services → IAP → enable |
+| GCP project with billing | `gcloud projects describe <project-id>` |
+| APIs enabled | `gcloud services list --project=<project-id>` |
+| GCS state bucket | `gsutil ls gs://<bucket-name>` |
+| IAP enabled | Console → APIs & Services → IAP |
+| Default VPC network | `gcloud compute networks list --project=<project-id>` |
 
-### 4. Dockerfile Changes
+### 4. Rebuild Docker Image
 
-`Dockerfile.api` needs gcloud CLI installed (after Terraform install block):
+The Dockerfile and dependencies already include gcloud CLI and google-cloud-* packages. After pulling the latest code:
 
-```dockerfile
-RUN curl -sSL https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir=/opt
-ENV PATH="/opt/google-cloud-sdk/bin:${PATH}"
+```bash
+docker compose build --no-cache api
 ```
 
-`pyproject.toml` needs:
-
-```
-google-cloud-compute>=1.15.0
-google-auth>=2.23.0
-```
+This rebuilds both `api` and `worker` (same image).
 
 ### 5. Docker Compose Volume Mount
 
-The SA key file must be accessible inside both `api` and `worker` containers:
+The WIF credential config must be accessible inside both `api` and `worker` containers.
+
+In `docker-compose.prod.yml`, change `volumes: []` to:
 
 ```yaml
 # In both api: and worker: services
 volumes:
-  - /opt/flare/credentials:/opt/flare/credentials:ro
+  - /etc/flare:/etc/flare:ro
 ```
 
 ### 6. Database Migration
@@ -554,14 +577,33 @@ Everything AWS still needs what it needed before:
 ### Setup Checklist
 
 ```
-[ ] GCP project created, APIs enabled
-[ ] Service account created with 4 roles
-[ ] SA key JSON on Flare instance at known path
-[ ] GCS bucket for Terraform state created
+[ ] WIF credential config JSON placed at /etc/flare/gcp-credentials.json
+[ ] Verified gcloud auth works from EC2 host
 [ ] .env updated with GCP_* vars + GOOGLE_APPLICATION_CREDENTIALS
 [ ] SES_FROM_ADDRESS removed from .env
-[ ] Dockerfile.api rebuilt with gcloud CLI + google-cloud-* deps
-[ ] SA key volume-mounted into api + worker containers
+[ ] Docker image rebuilt (docker compose build --no-cache api)
+[ ] docker-compose.prod.yml updated with /etc/flare volume mount
 [ ] alembic upgrade head run
+[ ] GCS state bucket exists
+[ ] Default VPC network exists in target region
 [ ] Route53 zone ID still set (used for GCP DNS too)
+[ ] docker compose up — verify api + worker start without import errors
+```
+
+### End-to-End Verification
+
+After setup is complete, test the full lifecycle:
+
+```
+[ ] Create a GCP site from the UI (select GCP provider, pick e2-standard-2)
+[ ] Verify Terraform provisions the GCE instance + static IP + DNS record
+[ ] Verify deploy script runs via gcloud SSH (IAP tunnel)
+[ ] Verify site comes up healthy at {name}.observal.io
+[ ] Stop the site — confirm instance stops
+[ ] Start the site — confirm instance starts + containers come back
+[ ] Redeploy the site — confirm git pull + rebuild works
+[ ] Rebuild the site — confirm env rewrite + container restart works
+[ ] Destroy the site — confirm instance deleted + GCS state cleaned up
+[ ] Verify Route53 record removed after destroy
+[ ] Create an AWS site — confirm zero regression (existing flow unchanged)
 ```

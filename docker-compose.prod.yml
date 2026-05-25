@@ -4,14 +4,16 @@ services:
       context: .
       dockerfile: Dockerfile.api
     command: uvicorn server.main:app --host 0.0.0.0 --port 8000 --workers 2
-    volumes: []
+    volumes:
+      - /etc/flare:/etc/flare:ro
     restart: unless-stopped
 
   worker:
     build:
       context: .
       dockerfile: Dockerfile.api
-    volumes: []
+    volumes:
+      - /etc/flare:/etc/flare:ro
     restart: unless-stopped
 
   web:
