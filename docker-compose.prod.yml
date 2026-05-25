@@ -20,6 +20,7 @@ services:
       CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: /etc/flare/gcp-credentials.json
     volumes:
       - /etc/flare:/etc/flare:ro
+      - worker-ssh:/root/.ssh
     restart: unless-stopped
 
   web:
@@ -34,3 +35,6 @@ services:
 
   redis:
     restart: unless-stopped
+
+volumes:
+  worker-ssh:
