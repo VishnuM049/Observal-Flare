@@ -31,7 +31,7 @@ class GCPRemoteRunner(SSMRunner):
         )
         await proc.communicate()
 
-    async def run_command(self, instance_id: str, script: str, timeout_seconds: int = 600) -> CommandResult:
+    async def run_command(self, instance_id: str, script: str, timeout_seconds: int = 1200) -> CommandResult:
         # instance_id is the GCE instance name for GCP sites
         await self._ensure_auth()
         script_file = None
