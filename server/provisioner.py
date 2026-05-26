@@ -77,8 +77,6 @@ def _write_env_script(overrides: dict[str, str]) -> str:
     overrides_content = "\n".join(f"{k}={v}" for k, v in overrides.items())
     return f"""rm -f .env /tmp/flare-overrides.env
 cp .env.example .env
-echo "DEBUG: .env after cp from .env.example:"
-grep DEPLOYMENT_MODE .env && echo "BUG: DEPLOYMENT_MODE found in .env.example copy" || echo "OK: no DEPLOYMENT_MODE after cp"
 cat > /tmp/flare-overrides.env << 'OVERRIDESEOF'
 {overrides_content}
 OVERRIDESEOF
@@ -124,8 +122,6 @@ if missing or mismatched:
 else:
     print(f'ENV OK: {{len(overrides)}} overrides verified')
 "
-echo "DEBUG: .env after merge:"
-grep DEPLOYMENT_MODE .env && echo "BUG: DEPLOYMENT_MODE appeared after merge — not from our code" || echo "OK: no DEPLOYMENT_MODE in final .env"
 rm -f /tmp/flare-overrides.env"""
 
 
@@ -538,7 +534,7 @@ git checkout {shlex.quote(sha)}
 {env_script}
 
 COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
-$COMPOSE up -d --build 2>&1
+$COMPOSE up -d --build 2>&1 || true
 
 # Wait for init container to finish (up to 5 min)
 for i in $(seq 1 60); do
