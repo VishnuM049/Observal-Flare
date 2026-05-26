@@ -75,7 +75,10 @@ def _write_env_script(overrides: dict[str, str]) -> str:
     then use Python to merge (override existing keys, append new ones).
     Finally, verify all overrides are present in the resulting .env."""
     overrides_content = "\n".join(f"{k}={v}" for k, v in overrides.items())
-    return f"""cp .env.example .env
+    return f"""rm -f .env /tmp/flare-overrides.env
+cp .env.example .env
+echo "DEBUG: .env after cp from .env.example:"
+grep DEPLOYMENT_MODE .env && echo "BUG: DEPLOYMENT_MODE found in .env.example copy" || echo "OK: no DEPLOYMENT_MODE after cp"
 cat > /tmp/flare-overrides.env << 'OVERRIDESEOF'
 {overrides_content}
 OVERRIDESEOF
@@ -121,6 +124,8 @@ if missing or mismatched:
 else:
     print(f'ENV OK: {{len(overrides)}} overrides verified')
 "
+echo "DEBUG: .env after merge:"
+grep DEPLOYMENT_MODE .env && echo "BUG: DEPLOYMENT_MODE appeared after merge — not from our code" || echo "OK: no DEPLOYMENT_MODE in final .env"
 rm -f /tmp/flare-overrides.env"""
 
 
