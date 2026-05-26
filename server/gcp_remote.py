@@ -103,7 +103,7 @@ class GCPRemoteRunner(SSMRunner):
             # Launch script in background via nohup, write exit code to marker file
             launch_cmd = (
                 "sudo bash -c '"
-                "nohup bash /tmp/flare-remote-script.sh "
+                "nohup bash -c \"bash /tmp/flare-remote-script.sh; echo \\$? > /tmp/flare-script.exit\" "
                 ">/tmp/flare-script-output.log 2>&1 &"
                 " echo $! > /tmp/flare-script.pid"
                 "'"
@@ -120,10 +120,10 @@ class GCPRemoteRunner(SSMRunner):
                 await asyncio.sleep(15)
                 rc, stdout, _ = await self._ssh(
                     instance_id,
-                    "sudo bash -c 'PID=$(cat /tmp/flare-script.pid 2>/dev/null); "
-                    "if [ -z \"$PID\" ]; then echo MISSING; "
-                    "elif kill -0 $PID 2>/dev/null; then echo RUNNING; "
-                    "else wait $PID 2>/dev/null; echo DONE:$?; fi'",
+                    "sudo bash -c '"
+                    "if [ -f /tmp/flare-script.exit ]; then echo DONE:$(cat /tmp/flare-script.exit); "
+                    "elif ! kill -0 $(cat /tmp/flare-script.pid 2>/dev/null) 2>/dev/null; then echo DONE:0; "
+                    "else echo RUNNING; fi'",
                     timeout=30,
                 )
                 status = stdout.strip()
@@ -133,7 +133,7 @@ class GCPRemoteRunner(SSMRunner):
                     _, output, _ = await self._ssh(
                         instance_id,
                         "sudo cat /tmp/flare-script-output.log 2>/dev/null; "
-                        "sudo rm -f /tmp/flare-remote-script.sh /tmp/flare-script.pid /tmp/flare-script-output.log",
+                        "sudo rm -f /tmp/flare-remote-script.sh /tmp/flare-script.pid /tmp/flare-script-output.log /tmp/flare-script.exit",
                         timeout=30,
                     )
                     if exit_code == 0:
