@@ -128,9 +128,10 @@ async def create_site(
             missing.append("ROUTE53_ZONE_ID")
         if not settings.github_token:
             missing.append("GITHUB_TOKEN")
+        # TODO: for AWS, could add boto3.Session().get_credentials() check
+        # to detect missing creds early (covers IAM roles, env vars, config files)
         if cloud_provider == "aws":
-            if not settings.aws_access_key_id:
-                missing.append("AWS_ACCESS_KEY_ID")
+            pass
         elif cloud_provider == "gcp":
             if not settings.gcp_project_id:
                 missing.append("GCP_PROJECT_ID")

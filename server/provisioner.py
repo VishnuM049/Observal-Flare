@@ -372,8 +372,9 @@ async def provision_site(
             site.provision_log = cmd_result.output[:2000]
 
         # Stage 5: Wait for healthy (always runs — script exit code is unreliable)
+        # First provision needs longer timeout — Docker build with no cache takes 10-14 min
         await publish_site_event(str(site.id), "stage_progress", message="Waiting for health check...")
-        healthy = await _wait_for_healthy(site)
+        healthy = await _wait_for_healthy(site, timeout_seconds=1200)
         if not healthy:
             script_hint = f" (deploy script also failed: {cmd_result.output[:200]})" if cmd_result.status != "success" else ""
             raise RuntimeError(f"Site {site.domain} did not become healthy within timeout{script_hint}")
