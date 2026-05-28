@@ -277,10 +277,11 @@ if ! [ -d "/etc/letsencrypt/live/{site.domain}" ]; then
     certbot certonly --standalone -d {site.domain} --non-interactive --agree-tos -m {site.requestor_email}
 fi
 
-# Start services (--build ensures we use the checked-out source, not stale registry images)
-# || true: compose may exit non-zero if init container exits (expected); Flare health check verifies the site
+# Build images first (no health check timers running during build)
 cd /opt/observal
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build || true
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build || true
+# Start services (images are built, containers start fast)
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d || true
 
 # Disable strict mode for auxiliary setup (cron, etc.) — failures here shouldn't kill the deploy
 set +euo pipefail
