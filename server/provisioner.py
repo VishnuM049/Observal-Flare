@@ -231,7 +231,7 @@ exec > >(tee /var/log/flare-deploy.log) 2>&1
 
 echo "=== Flare deploy for {site.domain} at {sha} ==="
 
-# Wait for startup script to finish (installs Docker, certbot, git)
+# Wait for startup script to finish (GCP instances run metadata_startup_script on boot)
 echo "Waiting for instance startup script to complete..."
 for i in $(seq 1 60); do
     [ -f /var/run/flare-startup-complete ] && break
@@ -241,23 +241,16 @@ if [ ! -f /var/run/flare-startup-complete ]; then
     echo "WARNING: Startup script marker not found after 5 min, proceeding anyway"
 fi
 
-# Fallback: install Docker from official repo if startup script didn't (or failed)
+# Install Docker if needed (from official repo — Ubuntu mirrors can be unreliable)
 if ! command -v docker &>/dev/null; then
-    echo "Docker not found, installing from official repo..."
-    for attempt in 1 2 3; do
-        apt-get install -y ca-certificates curl 2>/dev/null
-        install -m 0755 -d /etc/apt/keyrings
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-        chmod a+r /etc/apt/keyrings/docker.asc
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
-        apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && break
-        echo "Docker install attempt $attempt failed, retrying in 10s..."
-        sleep 10
-    done
+    apt-get install -y ca-certificates curl
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+    chmod a+r /etc/apt/keyrings/docker.asc
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+    apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     systemctl enable docker && systemctl start docker
 fi
-
-# Hard gate: fail loudly if Docker is still missing
 if ! command -v docker &>/dev/null; then
     echo "FATAL: Docker could not be installed. Aborting deploy."
     exit 1
@@ -286,17 +279,15 @@ sed -i "s|ssl_certificate_key .*|ssl_certificate_key /etc/letsencrypt/live/{site
 
 # TLS cert
 if ! [ -d "/etc/letsencrypt/live/{site.domain}" ]; then
-    if ! command -v certbot &>/dev/null; then
-        apt-get install -y certbot || (apt-get update && apt-get install -y certbot)
-    fi
+    apt-get install -y certbot
     certbot certonly --standalone -d {site.domain} --non-interactive --agree-tos -m {site.requestor_email}
 fi
 
 # Build images first (no health check timers running during build)
 cd /opt/observal
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1 || true
 # Start services (images are built, containers start fast)
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d || true
 
 # Disable strict mode for auxiliary setup (cron, etc.) — failures here shouldn't kill the deploy
 set +euo pipefail
@@ -525,7 +516,7 @@ async def redeploy_site(
             if state != "running":
                 await publish_site_event(str(site.id), "stage_progress", message="Starting instance...")
                 await compute.start(site.instance_id)
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1 && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d")
+            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build")
             if site.status in (SiteStatus.SLEEPING, SiteStatus.STOPPED):
                 site.status = SiteStatus.RUNNING
                 await db.commit()
@@ -545,14 +536,18 @@ set -euo pipefail
 exec > >(tee /var/log/flare-deploy.log) 2>&1
 cd /opt/observal
 git fetch origin {shlex.quote(sha)}
-git checkout {shlex.quote(sha)}
+git reset --hard {shlex.quote(sha)}
 
 # Write .env: start from .env.example defaults, then apply Flare overrides
 {env_script}
 
+# Configure Nginx for this domain
+sed -i "s/server_name .*/server_name {site.domain};/" /opt/observal/docker/nginx.production.conf
+sed -i "s|ssl_certificate .*|ssl_certificate /etc/letsencrypt/live/{site.domain}/fullchain.pem;|" /opt/observal/docker/nginx.production.conf
+sed -i "s|ssl_certificate_key .*|ssl_certificate_key /etc/letsencrypt/live/{site.domain}/privkey.pem;|" /opt/observal/docker/nginx.production.conf
+
 COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
-$COMPOSE build --jobs 1
-$COMPOSE up -d 2>&1 || true
+$COMPOSE up -d --build 2>&1 || true
 
 # Wait for init container to finish (up to 5 min)
 for i in $(seq 1 60); do
@@ -564,7 +559,7 @@ done
 
 # Check if init container failed (schema migration mismatch)
 if $COMPOSE logs observal-init 2>&1 | grep -q "Can't locate revision"; then
-{"    echo '=== Migration mismatch detected, wiping data and retrying ==='\n    $COMPOSE down -v\n    $COMPOSE build --jobs 1\n    $COMPOSE up -d" if site.auto_wipe_on_failure else "    echo 'ERROR: Migration mismatch detected. Data preserved. Enable auto-wipe or resolve manually.'\n    exit 1"}
+{"    echo '=== Migration mismatch detected, wiping data and retrying ==='\n    $COMPOSE down -v\n    $COMPOSE up -d --build" if site.auto_wipe_on_failure else "    echo 'ERROR: Migration mismatch detected. Data preserved. Enable auto-wipe or resolve manually.'\n    exit 1"}
 fi
 
 # Restart nginx lb to pick up new container IPs
@@ -602,8 +597,7 @@ $COMPOSE restart observal-lb 2>/dev/null || true
 set -euo pipefail
 cd /opt/observal
 docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml down -v
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d --build
 """
             await remote.run_command(site.instance_id, wipe_script)
             healthy = await _wait_for_healthy(site)
@@ -678,8 +672,7 @@ cd /opt/observal
 {env_script}
 
 COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
-$COMPOSE build --jobs 1
-$COMPOSE up -d 2>&1
+$COMPOSE up -d --build 2>&1
 
 # Wait for init container to finish (up to 5 min)
 for i in $(seq 1 60); do

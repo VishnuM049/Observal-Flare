@@ -59,7 +59,6 @@ resource "google_compute_instance" "site" {
 
   metadata_startup_script = <<-EOF
     #!/bin/bash
-    # Install Docker from official repo (Ubuntu regional mirrors can be unreliable)
     apt-get install -y ca-certificates curl
     install -m 0755 -d /etc/apt/keyrings
     curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
@@ -68,10 +67,7 @@ resource "google_compute_instance" "site" {
     apt-get update
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     systemctl enable docker && systemctl start docker
-
-    # Dependencies for deploy script
     apt-get install -y certbot git
-
     touch /var/run/flare-startup-complete
   EOF
 
