@@ -287,7 +287,7 @@ sed -i "s|ssl_certificate_key .*|ssl_certificate_key /etc/letsencrypt/live/{site
 # TLS cert
 if ! [ -d "/etc/letsencrypt/live/{site.domain}" ]; then
     if ! command -v certbot &>/dev/null; then
-        apt-get install -y certbot || { apt-get update && apt-get install -y certbot; }
+        apt-get install -y certbot || (apt-get update && apt-get install -y certbot)
     fi
     certbot certonly --standalone -d {site.domain} --non-interactive --agree-tos -m {site.requestor_email}
 fi
