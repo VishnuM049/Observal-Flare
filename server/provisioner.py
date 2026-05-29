@@ -285,7 +285,7 @@ fi
 
 # Build images first (no health check timers running during build)
 cd /opt/observal
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1 || true
+(docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1 || docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build) || true
 # Start services (images are built, containers start fast)
 docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d || true
 
@@ -516,7 +516,7 @@ async def redeploy_site(
             if state != "running":
                 await publish_site_event(str(site.id), "stage_progress", message="Starting instance...")
                 await compute.start(site.instance_id)
-            await remote.run_command(site.instance_id, "cd /opt/observal && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1 && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d")
+            await remote.run_command(site.instance_id, "cd /opt/observal && (docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1 || docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build) && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d")
             if site.status in (SiteStatus.SLEEPING, SiteStatus.STOPPED):
                 site.status = SiteStatus.RUNNING
                 await db.commit()
@@ -547,7 +547,7 @@ sed -i "s|ssl_certificate .*|ssl_certificate /etc/letsencrypt/live/{site.domain}
 sed -i "s|ssl_certificate_key .*|ssl_certificate_key /etc/letsencrypt/live/{site.domain}/privkey.pem;|" /opt/observal/docker/nginx.production.conf
 
 COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
-$COMPOSE build --jobs 1 2>&1 || true
+$COMPOSE build --jobs 1 || $COMPOSE build 2>&1 || true
 $COMPOSE up -d 2>&1 || true
 
 # Wait for init container to finish (up to 5 min)
@@ -560,7 +560,7 @@ done
 
 # Check if init container failed (schema migration mismatch)
 if $COMPOSE logs observal-init 2>&1 | grep -q "Can't locate revision"; then
-{"    echo '=== Migration mismatch detected, wiping data and retrying ==='\n    $COMPOSE down -v\n    $COMPOSE build --jobs 1\n    $COMPOSE up -d" if site.auto_wipe_on_failure else "    echo 'ERROR: Migration mismatch detected. Data preserved. Enable auto-wipe or resolve manually.'\n    exit 1"}
+{"    echo '=== Migration mismatch detected, wiping data and retrying ==='\n    $COMPOSE down -v\n    $COMPOSE build --jobs 1 || $COMPOSE build\n    $COMPOSE up -d" if site.auto_wipe_on_failure else "    echo 'ERROR: Migration mismatch detected. Data preserved. Enable auto-wipe or resolve manually.'\n    exit 1"}
 fi
 
 # Restart nginx lb to pick up new container IPs
@@ -598,7 +598,7 @@ $COMPOSE restart observal-lb 2>/dev/null || true
 set -euo pipefail
 cd /opt/observal
 docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml down -v
-docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1
+docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1 || docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build
 docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d
 """
             await remote.run_command(site.instance_id, wipe_script)
@@ -674,7 +674,7 @@ cd /opt/observal
 {env_script}
 
 COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
-$COMPOSE build --jobs 1 2>&1
+$COMPOSE build --jobs 1 || $COMPOSE build 2>&1
 $COMPOSE up -d 2>&1
 
 # Wait for init container to finish (up to 5 min)
