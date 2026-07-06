@@ -24,11 +24,11 @@ class Settings(BaseSettings):
     secret_key: str = "change-me-in-production"
     github_client_id: str = ""
     github_client_secret: str = ""
-    github_org: str = "BlazeUp-AI"
+    github_org: str = "Observal"
 
     # GitHub API (for ref resolution, PR comments, org membership)
     github_token: str = ""
-    github_repo_owner: str = "BlazeUp-AI"
+    github_repo_owner: str = "Observal"
     github_repo_name: str = "Observal"
     github_webhook_secret: str = ""
 

@@ -258,7 +258,7 @@ fi
 
 # Clone repo
 rm -rf /opt/observal
-git clone https://github.com/BlazeUp-AI/Observal.git /opt/observal
+git clone https://github.com/Observal/Observal.git /opt/observal
 cd /opt/observal
 
 if [[ "{site.deploy_type.value}" == "pr" ]]; then
@@ -516,10 +516,6 @@ async def redeploy_site(
             if state != "running":
                 await publish_site_event(str(site.id), "stage_progress", message="Starting instance...")
                 await compute.start(site.instance_id)
-            await remote.run_command(site.instance_id, "cd /opt/observal && (docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build --jobs 1 || docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml build) && docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml up -d")
-            if site.status in (SiteStatus.SLEEPING, SiteStatus.STOPPED):
-                site.status = SiteStatus.RUNNING
-                await db.commit()
 
         # Resolve new SHA
         sha = await github.resolve_ref(site.deploy_type.value, site.deploy_ref)
@@ -566,7 +562,7 @@ fi
 # Restart nginx lb to pick up new container IPs
 $COMPOSE restart observal-lb 2>/dev/null || true
 """
-        cmd_result = await remote.run_command(site.instance_id, update_script)
+        cmd_result = await remote.run_command(site.instance_id, update_script, timeout_seconds=1200)
         if cmd_result.status != "success":
             raise RuntimeError(f"Redeploy script failed: {cmd_result.output[:500]}")
 

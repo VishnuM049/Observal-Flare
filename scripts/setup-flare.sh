@@ -14,7 +14,7 @@ wget -qO- https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_a
 chmod +x /usr/local/bin/terraform
 
 # Clone Flare
-git clone https://github.com/BlazeUp-AI/Observal-Flare.git /opt/flare
+git clone https://github.com/Observal/Observal-Flare.git /opt/flare
 cd /opt/flare
 
 # Copy .env (user must edit this with real values)
