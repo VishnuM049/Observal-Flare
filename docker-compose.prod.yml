@@ -23,6 +23,18 @@ services:
       - worker-ssh:/root/.ssh
     restart: unless-stopped
 
+  experiment-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    network_mode: "host"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/flare
+      REDIS_URL: redis://localhost:6379
+    volumes:
+      - /etc/flare:/etc/flare:ro
+    restart: unless-stopped
+
   web:
     build:
       context: ./web

@@ -7,7 +7,8 @@ from arq import create_pool
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from server.api import audit_logs, auth, costs, deploy_sources, env_vars, health, sites, webhooks, ws
+from server.api import audit_logs, auth, costs, deploy_sources, env_vars, experiments, health, sites, webhooks, ws
+from server.api.experiments import set_experiment_arq_pool
 from server.api.sites import set_arq_pool
 from server.config import get_settings
 from server.worker.settings import get_redis_settings
@@ -23,6 +24,7 @@ async def lifespan(app: FastAPI):
 
     pool = await create_pool(get_redis_settings())
     set_arq_pool(pool)
+    set_experiment_arq_pool(pool)
     logger.info("ARQ pool connected")
 
     yield
@@ -56,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(audit_logs.router)
     app.include_router(costs.router)
     app.include_router(sites.router)
+    app.include_router(experiments.router)
     app.include_router(health.router)
     app.include_router(deploy_sources.router)
     app.include_router(env_vars.router)

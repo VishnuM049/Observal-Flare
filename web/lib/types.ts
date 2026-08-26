@@ -26,6 +26,102 @@ export interface User {
 
 export type CloudProvider = "aws" | "gcp";
 
+export type ExperimentStatus =
+  | "pending"
+  | "provisioning"
+  | "running"
+  | "destroying"
+  | "completed"
+  | "failed"
+  | "cleanup_failed"
+  | "cancelled";
+
+export interface ExperimentConfig {
+  enabled: boolean;
+  target_ref: string;
+  target_name: string | null;
+  max_rate_per_minute: number;
+  max_duration_minutes: number;
+  max_concurrency: number;
+  max_images: number;
+  max_transfer_bytes: number;
+}
+
+export interface ExperimentTarget {
+  requested_ref: string;
+  target_ref: string;
+  package_url: string;
+  platform: string;
+  image_size_bytes: number;
+  layer_count: number;
+  expected_pulls: number;
+  launched_pulls: number;
+  successful_pulls: number;
+  failed_pulls: number;
+  baseline_count: number | null;
+  current_count: number | null;
+  final_count: number | null;
+}
+
+export interface Experiment {
+  id: string;
+  status: ExperimentStatus;
+  target_ref: string;
+  package_url: string;
+  targets: ExperimentTarget[];
+  rate_per_minute: number;
+  duration_minutes: number;
+  expected_pulls: number;
+  concurrency_limit: number;
+  platform: string;
+  image_size_bytes: number;
+  layer_count: number;
+  estimated_transfer_bytes: number;
+  instance_type: string;
+  launched_pulls: number;
+  successful_pulls: number;
+  failed_pulls: number;
+  active_pulls: number;
+  max_concurrency: number | null;
+  baseline_count: number | null;
+  immediate_count: number | null;
+  delayed_count: number | null;
+  results: Record<string, unknown>;
+  instance_id: string | null;
+  terraform_state_key: string;
+  cancellation_requested: boolean;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  destroyed_at: string | null;
+  last_progress_at: string | null;
+  error_message: string | null;
+  cleanup_error: string | null;
+}
+
+export interface ExperimentEvent {
+  id: string;
+  event_type: string;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface ExperimentPreflight {
+  targets: ExperimentTarget[];
+  estimated_transfer_bytes: number;
+  within_transfer_limit: boolean;
+  max_transfer_bytes: number;
+}
+
+export interface ExperimentCreateRequest {
+  target_refs: string[];
+  resolved_target_refs: string[];
+  rate_per_minute: number;
+  duration_minutes: number;
+  concurrency_limit: number;
+  confirmation: string;
+}
+
 export interface Site {
   id: string;
   name: string;

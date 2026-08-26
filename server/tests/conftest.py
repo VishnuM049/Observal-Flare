@@ -1,6 +1,7 @@
 """Test fixtures: async DB session against Docker Postgres, helper factories."""
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -10,10 +11,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from server.database import Base
+from server.models.experiment import Experiment  # noqa: F401 — register test table
 from server.models.site import DeployType, Site, SiteStatus, SleepMode
 from server.models.user import User, UserRole
 
-TEST_DB_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/flare_test"
+TEST_DB_URL = os.getenv(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://postgres:postgres@localhost:5432/flare_test",
+)
 
 
 @pytest_asyncio.fixture
@@ -29,7 +34,7 @@ async def db():
 
     async with engine.begin() as conn:
         await conn.execute(text(
-            "TRUNCATE audit_logs, sites, users CASCADE"
+            "TRUNCATE audit_logs, experiments, sites, users CASCADE"
         ))
 
     await engine.dispose()

@@ -10,6 +10,7 @@ import { LogoutButton } from "./logout-button";
 const NAV_LINKS = [
   { href: "/sites", label: "Sites" },
   { href: "/sites/new", label: "New Site" },
+  { href: "/experiments", label: "Experiments" },
   { href: "/admin/costs", label: "Costs" },
   { href: "/admin/audit", label: "Audit Log" },
 ];

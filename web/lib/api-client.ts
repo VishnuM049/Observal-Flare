@@ -1,6 +1,11 @@
 import type {
   AuditLogEntry,
   CostSummary,
+  Experiment,
+  ExperimentConfig,
+  ExperimentEvent,
+  ExperimentCreateRequest,
+  ExperimentPreflight,
   Site,
   SiteCreateRequest,
   User,
@@ -74,6 +79,28 @@ export const sites = {
       method: "POST",
       body: JSON.stringify({ lock_id: lockId }),
     }),
+};
+
+// Isolated GHCR experiments
+export const experiments = {
+  config: () => request<ExperimentConfig>("/api/experiments/config"),
+  list: () => request<Experiment[]>("/api/experiments"),
+  get: (id: string) => request<Experiment>(`/api/experiments/${id}`),
+  events: (id: string) => request<ExperimentEvent[]>(`/api/experiments/${id}/events`),
+  preflight: (targetRefs: string[], expectedPulls: number) =>
+    request<ExperimentPreflight>("/api/experiments/preflight", {
+      method: "POST",
+      body: JSON.stringify({ target_refs: targetRefs, expected_pulls: expectedPulls }),
+    }),
+  create: (data: ExperimentCreateRequest) =>
+    request<Experiment>("/api/experiments", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  cancel: (id: string) =>
+    request<Experiment>(`/api/experiments/${id}/cancel`, { method: "POST" }),
+  retryCleanup: (id: string) =>
+    request<Experiment>(`/api/experiments/${id}/retry-cleanup`, { method: "POST" }),
 };
 
 // Deploy sources

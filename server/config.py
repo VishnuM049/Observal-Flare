@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     terraform_state_bucket: str = "flare-terraform-state"
     terraform_lock_table: str = "flare-terraform-locks"
 
+    # Isolated GHCR download experiments. The target is configured in one place
+    # and must be a public, digest-pinned ghcr.io image.
+    ghcr_experiments_enabled: bool = False
+    ghcr_experiment_image: str = ""
+    ghcr_experiment_instance_type: str = "t3.small"
+    ghcr_experiment_max_rate_per_minute: int = 48
+    ghcr_experiment_max_duration_minutes: int = 60
+    ghcr_experiment_max_concurrency: int = 4
+    ghcr_experiment_max_images: int = 4
+    ghcr_experiment_max_transfer_gb: int = 50
+
     # GCP
     gcp_project_id: str = ""
     gcp_region: str = "us-central1"
