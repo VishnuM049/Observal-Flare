@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
 import uuid
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -257,6 +261,70 @@ def test_script_uses_isolated_outputs_and_no_docker_daemon() -> None:
     assert TARGET_TWO in script
     assert "https://flare.example/api/experiments/id/progress" in script
     assert "signed-token" in script
+
+
+def test_generated_script_records_completed_pull_target(tmp_path: Path) -> None:
+    script = build_experiment_script(
+        [TARGET],
+        rate_per_minute=60,
+        expected_pulls=1,
+        concurrency_limit=1,
+        progress_url="http://127.0.0.1:1/progress",
+        progress_token="signed-token",
+    )
+    python_source = script.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0]
+
+    fake_crane = tmp_path / "crane"
+    fake_crane.write_text(
+        """#!/usr/bin/env python3
+import io
+import sys
+import tarfile
+
+payload = b"image"
+with tarfile.open(sys.argv[3], "w") as archive:
+    member = tarfile.TarInfo("manifest.json")
+    member.size = len(payload)
+    archive.addfile(member, io.BytesIO(payload))
+"""
+    )
+    fake_crane.chmod(0o755)
+    trials = tmp_path / "trials"
+    trials.mkdir()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            python_source,
+            str(fake_crane),
+            json.dumps([TARGET]),
+            str(trials),
+            "1",
+            "0",
+            "1",
+            "http://127.0.0.1:1/progress",
+            "signed-token",
+            str(tmp_path / "CANCELLED"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result_lines = [
+        line for line in completed.stdout.splitlines() if line.startswith("FLARE_EXPERIMENT_RESULT=")
+    ]
+    assert len(result_lines) == 1
+    summary = json.loads(result_lines[0].split("=", 1)[1])
+    assert summary["launched"] == 1
+    assert summary["successful"] == 1
+    assert summary["failed"] == 0
+    assert summary["targets"] == [
+        {"target_ref": TARGET, "launched": 1, "successful": 1, "failed": 0}
+    ]
 
 
 def test_worker_queues_are_separate() -> None:

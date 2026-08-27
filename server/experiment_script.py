@@ -52,6 +52,7 @@ import datetime as dt
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -159,10 +160,12 @@ def reap():
             error = log_path.read_text(errors="replace")[-500:] if log_path.exists() else "missing archive"
             if stop_reason is None:
                 stop_reason = f"trial {{item['trial']}} failed: {{error}}"
-        results.append({{"return_code": return_code, "verified": verified}})
-        for child in item["directory"].iterdir():
-            child.unlink(missing_ok=True)
-        item["directory"].rmdir()
+        results.append({{
+            "target_ref": item["target_ref"],
+            "return_code": return_code,
+            "verified": verified,
+        }})
+        shutil.rmtree(item["directory"])
         del active[process]
     report_progress()
 
