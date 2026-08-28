@@ -77,7 +77,7 @@ def _defaults() -> tuple[ExperimentInfraRunner, SSMRunner, ComputeRunner, CountR
 def _parse_result(output: str) -> dict:
     result_lines = [line for line in output.splitlines() if line.startswith(RESULT_MARKER)]
     if len(result_lines) != 1:
-        raise RuntimeError("Experiment command did not return exactly one result summary")
+        raise RuntimeError(f"expected 1 result summary, found {len(result_lines)}")
     try:
         result = json.loads(result_lines[0][len(RESULT_MARKER):])
     except json.JSONDecodeError as exc:
@@ -403,9 +403,12 @@ async def run_experiment(
                 summary = _parse_result(command_result.output)
                 weighted_complete = _validate_member_summary(summary, target_refs, target_quotas)
             except Exception as exc:
+                message = f"SSM command {command_result.status}; {exc}"
+                if command_result.stderr.strip():
+                    message += f"; stderr: {command_result.stderr.strip()}"
                 instance["status"] = "failed"
-                instance["error_message"] = str(exc)[:2000]
-                member_errors.append(f"{instance_id}: {exc}")
+                instance["error_message"] = message[:2000]
+                member_errors.append(f"{instance_id}: {message}")
                 continue
             summaries.append({"instance_index": index, "instance_id": instance_id, **summary})
             instance["launched_pulls"] = int(summary["launched"])
@@ -424,7 +427,10 @@ async def run_experiment(
             instance["status"] = "completed" if complete else "failed"
             if not complete:
                 reason = summary.get("stop_reason") or command_result.status
-                instance["error_message"] = f"Instance completed incompletely: {reason}"[:2000]
+                message = f"SSM command {command_result.status}; instance completed incompletely: {reason}"
+                if command_result.stderr.strip():
+                    message += f"; stderr: {command_result.stderr.strip()}"
+                instance["error_message"] = message[:2000]
                 member_errors.append(f"{instance_id}: {instance['error_message']}")
 
         aggregate_instance_progress(experiment, instances)

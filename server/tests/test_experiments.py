@@ -29,6 +29,7 @@ from server.api.experiments import (
 from server.compute import ComputeRunner
 from server.experiment_provisioner import (
     MockExperimentSSM,
+    _parse_result,
     aggregate_instance_progress,
     ensure_instance_records,
     run_experiment,
@@ -90,7 +91,11 @@ class TrackingInfra(ExperimentInfraRunner):
 
 class FailingRemote(SSMRunner):
     async def run_command(self, instance_id: str, script: str, timeout_seconds: int = 600) -> CommandResult:
-        return CommandResult(status="failed", output="crane failed before producing a summary")
+        return CommandResult(
+            status="timedout",
+            output="crane failed before producing a summary",
+            stderr="execution timed out",
+        )
 
 
 class WrongWeightedDistributionRemote(SSMRunner):
@@ -171,6 +176,21 @@ def make_experiment(user: User, **overrides) -> Experiment:
     }
     defaults.update(overrides)
     return Experiment(**defaults)
+
+
+def test_parse_result_reports_missing_summary_count() -> None:
+    with pytest.raises(RuntimeError, match="expected 1 result summary, found 0"):
+        _parse_result("command output without a summary")
+
+
+def test_parse_result_reports_duplicate_summary_count() -> None:
+    summary = json.dumps(
+        {"requested": 1, "launched": 1, "successful": 1, "failed": 0, "max_concurrency": 1}
+    )
+    output = f"FLARE_EXPERIMENT_RESULT={summary}\nFLARE_EXPERIMENT_RESULT={summary}"
+
+    with pytest.raises(RuntimeError, match="expected 1 result summary, found 2"):
+        _parse_result(output)
 
 
 def test_progress_token_is_scoped_to_one_experiment() -> None:
@@ -831,7 +851,10 @@ async def test_command_failure_still_destroys_infrastructure(db: AsyncSession, a
     assert result.status == ExperimentStatus.FAILED
     assert result.instance_id is None
     assert result.destroyed_at is not None
-    assert "result summary" in (result.error_message or "")
+    assert "SSM command timedout; expected 1 result summary, found 0" in (
+        result.error_message or ""
+    )
+    assert "stderr: execution timed out" in (result.error_message or "")
 
 
 async def test_progress_event_retention_is_hard_capped(

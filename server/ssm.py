@@ -15,6 +15,14 @@ from server.config import get_settings
 class CommandResult:
     status: str
     output: str
+    stderr: str = ""
+
+
+# SendCommand.TimeoutSeconds controls how long SSM will try to deliver a
+# command to an instance. AWS-RunShellScript's executionTimeout parameter is
+# the separate limit for the script after delivery.
+DELIVERY_TIMEOUT_SECONDS = 600
+RESULT_POLL_GRACE_SECONDS = 60
 
 
 class SSMRunner(abc.ABC):
@@ -38,12 +46,15 @@ class RealSSM(SSMRunner):
         resp = await loop.run_in_executor(None, lambda: self._client.send_command(
             InstanceIds=[instance_id],
             DocumentName="AWS-RunShellScript",
-            Parameters={"commands": [script]},
-            TimeoutSeconds=timeout_seconds,
+            Parameters={
+                "commands": [script],
+                "executionTimeout": [str(timeout_seconds)],
+            },
+            TimeoutSeconds=DELIVERY_TIMEOUT_SECONDS,
         ))
         command_id = resp["Command"]["CommandId"]
 
-        deadline = time.time() + timeout_seconds
+        deadline = time.time() + timeout_seconds + RESULT_POLL_GRACE_SECONDS
         while time.time() < deadline:
             await asyncio.sleep(10)
             result = await loop.run_in_executor(None, lambda: self._client.get_command_invocation(
@@ -52,9 +63,11 @@ class RealSSM(SSMRunner):
             ))
             status = result["Status"]
             if status in ("Success", "Failed", "TimedOut", "Cancelled"):
-                output = result.get("StandardOutputContent", "")
+                stdout = result.get("StandardOutputContent", "")
+                stderr = result.get("StandardErrorContent", "")
+                output = stdout
                 if status != "Success":
-                    output += "\n--- STDERR ---\n" + result.get("StandardErrorContent", "")
-                return CommandResult(status=status.lower(), output=output)
+                    output += "\n--- STDERR ---\n" + stderr
+                return CommandResult(status=status.lower(), output=output, stderr=stderr)
 
         return CommandResult(status="timeout", output="Command timed out waiting for result")
