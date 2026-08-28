@@ -48,8 +48,7 @@ export default function NewExperimentPage() {
   const preflightCurrent = preflight?.targets.map((target) => target.requested_ref).join("\n") === targetRefs.join("\n")
     && preflight.targets.map((target) => target.weight).join(",") === targetWeights.join(",")
     && preflight.targets.reduce((sum, target) => sum + target.expected_pulls, 0) === expected;
-  const parallelismValid = targetRefs.length <= 1 || concurrency <= targetRefs.length;
-  const valid = Boolean(config?.enabled && preflightCurrent && preflight?.within_transfer_limit && parallelismValid)
+  const valid = Boolean(config?.enabled && preflightCurrent && preflight?.within_transfer_limit)
     && weightsValid && confirmation === confirmationText;
 
   async function runPreflight() {
@@ -255,8 +254,8 @@ export default function NewExperimentPage() {
               value={concurrency}
               onChange={(event) => setConcurrency(Number(event.target.value))}
             />
-            <p className="text-xs mt-1" style={{ color: parallelismValid ? "var(--color-ink-muted)" : "var(--color-danger)" }}>
-              For multiple images, concurrency cannot exceed the image count because one image is never pulled concurrently with itself. A single-image run may use the full configured limit.
+            <p className="text-xs mt-1" style={{ color: "var(--color-ink-muted)" }}>
+              Applies per instance for both single- and multi-image runs. Concurrent pulls of the same image remain isolated in separate config, archive, log, and trial directories.
             </p>
           </div>
           <div className="grid grid-cols-4 gap-3 text-sm">

@@ -181,14 +181,14 @@ def reap():
     report_progress()
 
 
-def next_target_index(step, unavailable):
+def next_target_index(step):
     candidates = [
         index
         for index, quota in enumerate(target_quotas)
-        if target_assigned[index] < quota and index not in unavailable
+        if target_assigned[index] < quota
     ]
     if not candidates:
-        return None
+        raise RuntimeError("weighted schedule exhausted before requested pull count")
     # Largest proportional deficit gives a smooth weighted round-robin order,
     # while the precomputed quotas preserve the exact requested total.
     chosen = max(
@@ -200,8 +200,11 @@ def next_target_index(step, unavailable):
 
 
 launched = 0
+last_launch_at = None
 for trial in range(1, requested + 1):
     target_time = base + (trial - 1) * interval
+    if last_launch_at is not None:
+        target_time = max(target_time, last_launch_at + interval)
     while True:
         reap()
         if cancel_file.exists() and stop_reason is None:
@@ -214,26 +217,17 @@ for trial in range(1, requested + 1):
         time.sleep(min(remaining, 0.05))
     if stop_reason:
         break
-    if len(active) >= max_concurrency:
-        stop_reason = f"concurrency limit {{max_concurrency}} reached before trial {{trial}}"
-        break
-    while True:
-        unavailable = {{
-            target_refs.index(item["target_ref"])
-            for item in active.values()
-        }} if len(target_refs) > 1 else set()
-        target_index = next_target_index(launched, unavailable)
-        if target_index is not None:
-            break
+    while len(active) >= max_concurrency:
         reap()
         if cancel_file.exists() and stop_reason is None:
             stop_reason = "cancelled by administrator"
         if stop_reason:
             break
-        time.sleep(0.05)
+        if len(active) >= max_concurrency:
+            time.sleep(0.05)
     if stop_reason:
         break
-    target_ref = target_refs[target_index]
+    target_ref = target_refs[next_target_index(launched)]
 
     directory = root / f"trial-{{trial:05d}}"
     config = directory / "docker-config"
@@ -256,6 +250,7 @@ for trial in range(1, requested + 1):
         "log_handle": log_handle,
     }}
     launched += 1
+    last_launch_at = time.monotonic()
     max_seen = max(max_seen, len(active))
 
 while active:

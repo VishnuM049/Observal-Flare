@@ -220,8 +220,6 @@ async def create_experiment(
         raise ExperimentError(f"Choose between 1 and {settings.ghcr_experiment_max_images} images")
     if len(set(target_refs)) != len(target_refs):
         raise ExperimentError("Experiment images must be unique")
-    if len(target_refs) > 1 and concurrency_limit > len(target_refs):
-        raise ExperimentError("Concurrency cannot exceed the image count for a multi-image experiment")
     preflights = await asyncio.gather(*(preflight_image(target) for target in target_refs))
     resolved_refs = [item.target_ref for item in preflights]
     if resolved_refs != expected_resolved_refs:

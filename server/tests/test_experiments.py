@@ -311,12 +311,13 @@ async def test_create_experiment_distributes_pulls_across_targets(
             expected_resolved_refs=[TARGET, TARGET_TWO],
             rate_per_minute=4,
             duration_minutes=1,
-            concurrency_limit=2,
+            concurrency_limit=4,
             instance_count=2,
             target_weights=[2, 1],
         )
 
     assert experiment.instance_count == 2
+    assert experiment.concurrency_limit == 4
     assert experiment.expected_pulls == 8
     assert [target["weight"] for target in experiment.targets] == [2, 1]
     assert [target["expected_pulls"] for target in experiment.targets] == [6, 2]
@@ -413,6 +414,73 @@ with tarfile.open(sys.argv[3], "w") as archive:
     assert summary["targets"] == [
         {"target_ref": TARGET, "launched": 4, "successful": 4, "failed": 0},
         {"target_ref": TARGET_TWO, "launched": 2, "successful": 2, "failed": 0},
+    ]
+
+
+def test_generated_script_allows_same_image_overlap_above_image_count(tmp_path: Path) -> None:
+    script = build_experiment_script(
+        [TARGET, TARGET_TWO],
+        rate_per_minute=1200,
+        expected_pulls=8,
+        concurrency_limit=4,
+        progress_url="http://127.0.0.1:1/progress",
+        progress_token="signed-token",
+        target_weights=[1, 1],
+    )
+    python_source = script.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0]
+
+    fake_crane = tmp_path / "slow-crane"
+    fake_crane.write_text(
+        """#!/usr/bin/env python3
+import io
+import sys
+import tarfile
+import time
+
+time.sleep(0.35)
+payload = b"image"
+with tarfile.open(sys.argv[3], "w") as archive:
+    member = tarfile.TarInfo("manifest.json")
+    member.size = len(payload)
+    archive.addfile(member, io.BytesIO(payload))
+"""
+    )
+    fake_crane.chmod(0o755)
+    trials = tmp_path / "overlap-trials"
+    trials.mkdir()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            python_source,
+            str(fake_crane),
+            json.dumps([TARGET, TARGET_TWO]),
+            str(trials),
+            "8",
+            "0.05",
+            "4",
+            "http://127.0.0.1:1/progress",
+            "signed-token",
+            str(tmp_path / "CANCELLED"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result_line = next(
+        line for line in completed.stdout.splitlines() if line.startswith("FLARE_EXPERIMENT_RESULT=")
+    )
+    summary = json.loads(result_line.split("=", 1)[1])
+    assert 2 < summary["max_concurrency"] <= 4
+    assert summary["launched"] == 8
+    assert summary["successful"] == 8
+    assert summary["targets"] == [
+        {"target_ref": TARGET, "launched": 4, "successful": 4, "failed": 0},
+        {"target_ref": TARGET_TWO, "launched": 4, "successful": 4, "failed": 0},
     ]
 
 

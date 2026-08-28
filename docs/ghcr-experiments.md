@@ -47,12 +47,12 @@ The existing site queue remains `arq:queue` and can provision, redeploy, start, 
 - The server enforces rate, duration, concurrency, and estimated-transfer limits.
 - A registry preflight verifies public access, platform, layer count, and compressed size before creation.
 - The browser requires an exact `RUN <pull-count>` confirmation.
-- Pulls are anonymous and use a unique config/output directory per process.
-- Multiple targets are scheduled with weighted round-robin independently on every fleet member. Exact rounded quotas are preserved, and a target is not started again while its previous pull is active.
+- Pulls are anonymous and each uses an isolated Docker config, archive, log, and trial directory.
+- Multiple targets are scheduled with weighted round-robin independently on every fleet member. Exact rounded quotas are preserved, and the same image may occupy multiple concurrency slots safely.
 - Every fleet member sends an instance-scoped signed progress callback valid for the full configured run window. Pre-fleet tokens remain accepted for member zero during rolling deployments.
 - Administrators can cancel an active run; Flare retries cancellation signals and queues forced Terraform cleanup if any member cannot be reached. Cancellation remains retryable in the UI.
 - There are no pull retries.
-- New launches stop after the first failed pull or if the concurrency cap is reached.
+- New launches stop after the first failed pull. At the selected concurrency cap, scheduling waits for a slot and never exceeds the per-instance limit.
 - Every EC2 instance schedules a safety shutdown after the requested duration plus 60 minutes.
 - Terraform creates all fleet members in one experiment state and destroy runs even when provisioning or remote commands partially fail.
 - Failed destroys retain state and are marked `cleanup_failed`; they are never reported as successfully destroyed.
