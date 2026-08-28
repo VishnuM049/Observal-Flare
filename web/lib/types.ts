@@ -43,6 +43,7 @@ export interface ExperimentConfig {
   max_rate_per_minute: number;
   max_duration_minutes: number;
   max_concurrency: number;
+  max_instances: number;
   max_images: number;
   max_transfer_bytes: number;
 }
@@ -54,13 +55,37 @@ export interface ExperimentTarget {
   platform: string;
   image_size_bytes: number;
   layer_count: number;
+  weight: number;
   expected_pulls: number;
+  estimated_transfer_bytes: number;
   launched_pulls: number;
   successful_pulls: number;
   failed_pulls: number;
   baseline_count: number | null;
   current_count: number | null;
   final_count: number | null;
+}
+
+export interface ExperimentInstance {
+  index: number;
+  instance_id: string | null;
+  status: string;
+  cleanup_status: string;
+  launched_pulls: number;
+  successful_pulls: number;
+  failed_pulls: number;
+  active_pulls: number;
+  max_concurrency: number;
+  last_progress_at: string | null;
+  error_message: string | null;
+  run_log: string | null;
+  targets: Array<{
+    target_ref: string;
+    launched: number;
+    successful: number;
+    failed: number;
+    active?: number;
+  }>;
 }
 
 export interface Experiment {
@@ -72,6 +97,7 @@ export interface Experiment {
   rate_per_minute: number;
   duration_minutes: number;
   expected_pulls: number;
+  instance_count: number;
   concurrency_limit: number;
   platform: string;
   image_size_bytes: number;
@@ -87,6 +113,7 @@ export interface Experiment {
   immediate_count: number | null;
   delayed_count: number | null;
   results: Record<string, unknown>;
+  instances: ExperimentInstance[];
   instance_id: string | null;
   terraform_state_key: string;
   cancellation_requested: boolean;
@@ -116,9 +143,11 @@ export interface ExperimentPreflight {
 export interface ExperimentCreateRequest {
   target_refs: string[];
   resolved_target_refs: string[];
+  target_weights: number[];
   rate_per_minute: number;
   duration_minutes: number;
   concurrency_limit: number;
+  instance_count: number;
   confirmation: string;
 }
 

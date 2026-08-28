@@ -1,6 +1,6 @@
 # Isolated GHCR download experiments
 
-Flare can run a bounded GHCR download-count experiment on a disposable EC2 instance. Experiments are separate from Observal sites: they use their own database table, API, UI, Terraform module, state prefix, ARQ queue, and worker.
+Flare can run a bounded GHCR download-count experiment on a disposable fleet of EC2 instances. Experiments are separate from Observal sites: they use their own database table, API, UI, Terraform module, state prefix, ARQ queue, and worker.
 
 ## Enable and select the target
 
@@ -18,13 +18,14 @@ Optional operational bounds:
 ```dotenv
 GHCR_EXPERIMENT_INSTANCE_TYPE=t3.small
 GHCR_EXPERIMENT_MAX_RATE_PER_MINUTE=48
-GHCR_EXPERIMENT_MAX_DURATION_MINUTES=60
+GHCR_EXPERIMENT_MAX_DURATION_MINUTES=1440
 GHCR_EXPERIMENT_MAX_CONCURRENCY=4
+GHCR_EXPERIMENT_MAX_INSTANCES=10
 GHCR_EXPERIMENT_MAX_IMAGES=4
 GHCR_EXPERIMENT_MAX_TRANSFER_GB=50
 ```
 
-Restart the API and dedicated experiment worker after changing configuration.
+Restart the API and dedicated experiment worker after changing configuration. Each experiment selects 1–`GHCR_EXPERIMENT_MAX_INSTANCES` fleet members; rate, duration, and concurrency are per instance, while expected pulls and transfer estimates are fleet-wide. Every image has a positive integer weight. Flare uses largest-remainder allocation to preserve the exact per-instance pull total, then interleaves those quotas with weighted round-robin scheduling on every member.
 
 ## Isolation
 
@@ -42,20 +43,24 @@ The existing site queue remains `arq:queue` and can provision, redeploy, start, 
 ## Safety behavior
 
 - Admin access is required.
-- Only one experiment may be active at a time.
+- Only one experiment (one fleet) may be active globally at a time.
 - The server enforces rate, duration, concurrency, and estimated-transfer limits.
 - A registry preflight verifies public access, platform, layer count, and compressed size before creation.
 - The browser requires an exact `RUN <pull-count>` confirmation.
 - Pulls are anonymous and use a unique config/output directory per process.
-- Multiple targets are scheduled round-robin, and the same target is never active in two parallel slots.
-- The instance sends signed, two-hour progress callbacks; the UI persists and displays the event timeline.
-- Administrators can cancel an active run; Flare writes a cancellation marker, stops active pull processes, and then destroys infrastructure.
+- Multiple targets are scheduled with weighted round-robin independently on every fleet member. Exact rounded quotas are preserved, and a target is not started again while its previous pull is active.
+- Every fleet member sends an instance-scoped signed progress callback valid for the full configured run window. Pre-fleet tokens remain accepted for member zero during rolling deployments.
+- Administrators can cancel an active run; Flare retries cancellation signals and queues forced Terraform cleanup if any member cannot be reached. Cancellation remains retryable in the UI.
 - There are no pull retries.
 - New launches stop after the first failed pull or if the concurrency cap is reached.
-- The EC2 instance schedules a safety shutdown after the requested duration plus 15 minutes.
-- Terraform destroy runs even when the remote command fails.
+- Every EC2 instance schedules a safety shutdown after the requested duration plus 60 minutes.
+- Terraform creates all fleet members in one experiment state and destroy runs even when provisioning or remote commands partially fail.
 - Failed destroys retain state and are marked `cleanup_failed`; they are never reported as successfully destroyed.
-- A five-minute janitor retries cleanup for stale experiments.
+- A five-minute janitor runs in a reserved second worker slot, revalidates staleness under a database lock, and cannot overwrite a newly completed run.
+- Terraform init/apply/destroy processes have hard timeouts; timeout or ARQ cancellation terminates and reaps the complete Terraform/provider process group.
+- Progress and counter timeline events are throttled, retained with hard caps, and the UI fetches only the newest page.
+- Progress callbacks and final summaries are rejected if any image exceeds or violates its weighted per-member quota.
+- Fleet peak concurrency is an estimate derived from the latest per-member active samples, which may not represent the exact same instant; per-member historical peaks remain visible separately.
 
 ## Production deployment
 
@@ -68,7 +73,7 @@ arq server.worker.experiment_tasks.ExperimentWorkerSettings
 
 The Flare AWS identity needs the same EC2, IAM instance-profile, SSM, S3 state, DynamoDB lock, and tagging permissions already required for AWS site provisioning. The selected default VPC must provide outbound internet access because the instance retrieves the pinned `crane` release and the public GHCR image.
 
-The API container runs Alembic migration `0003` on deployment. Keep the feature flag disabled during the first deployment, verify normal site operations, then enable experiments and restart the API and experiment worker.
+The API container runs Alembic migrations through `0005` on deployment. Migration `0005` also repairs fleet target rows written by an early `0004` rollout. Keep the feature flag disabled during the first deployment, verify normal site operations, then enable experiments and restart the API and experiment worker.
 
 ## Feature rollback
 

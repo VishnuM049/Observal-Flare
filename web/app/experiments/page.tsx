@@ -94,7 +94,7 @@ export default function ExperimentsPage() {
                   {item.target_ref.split("@")[0]}
                   {item.targets.length > 1 && <span className="ml-1">+{item.targets.length - 1}</span>}
                 </td>
-                <td className="px-4 py-3">{item.rate_per_minute}/min × {item.duration_minutes}m</td>
+                <td className="px-4 py-3">{item.rate_per_minute}/min × {item.duration_minutes}m × {item.instance_count} EC2</td>
                 <td className="px-4 py-3">{item.successful_pulls}/{item.expected_pulls}</td>
                 <td className="px-4 py-3">
                   {item.baseline_count ?? "—"} → {item.delayed_count ?? item.immediate_count ?? "—"}

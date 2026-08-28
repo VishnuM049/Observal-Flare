@@ -32,6 +32,8 @@ data "aws_ssm_parameter" "amazon_linux" {
 }
 
 resource "aws_instance" "experiment" {
+  count = var.instance_count
+
   ami                         = data.aws_ssm_parameter.amazon_linux.value
   instance_type               = var.instance_type
   subnet_id                   = sort(data.aws_subnets.default.ids)[0]
@@ -59,10 +61,11 @@ resource "aws_instance" "experiment" {
   }
 
   tags = {
-    Name         = "flare-experiment-${var.experiment_id}"
+    Name         = "flare-experiment-${var.experiment_id}-${count.index + 1}"
     ManagedBy    = "flare"
     Purpose      = "ghcr-download-experiment"
     ExperimentId = var.experiment_id
+    FleetIndex   = tostring(count.index)
     ExpiresAt    = var.expires_at
   }
 }

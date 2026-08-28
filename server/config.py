@@ -47,8 +47,9 @@ class Settings(BaseSettings):
     ghcr_experiment_image: str = ""
     ghcr_experiment_instance_type: str = "t3.small"
     ghcr_experiment_max_rate_per_minute: int = 48
-    ghcr_experiment_max_duration_minutes: int = 60
+    ghcr_experiment_max_duration_minutes: int = 1440
     ghcr_experiment_max_concurrency: int = 4
+    ghcr_experiment_max_instances: int = 10
     ghcr_experiment_max_images: int = 4
     ghcr_experiment_max_transfer_gb: int = 50
 

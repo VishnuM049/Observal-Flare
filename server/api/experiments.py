@@ -5,13 +5,15 @@ import uuid
 from datetime import UTC, datetime
 
 from arq import ArqRedis
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from server.api.deps import DB, AdminUser
 from server.config import get_settings
 from server.database import async_session
+from server.experiment_provisioner import aggregate_instance_progress, ensure_instance_records
+from server.experiment_weights import ExperimentWeightError, allocate_weighted_pulls, normalize_weights
 from server.mock import MockSSM
 from server.models.audit_log import AuditLog
 from server.models.experiment import Experiment, ExperimentEvent, ExperimentStatus
@@ -29,6 +31,38 @@ from server.ssm import RealSSM
 
 router = APIRouter(prefix="/api/experiments", tags=["experiments"])
 _experiment_pool: ArqRedis | None = None
+PROGRESS_EVENT_INTERVAL_SECONDS = 300
+MAX_PROGRESS_EVENTS = 1000
+MAX_COUNTER_EVENTS = 500
+
+
+def _validate_progress_callback_token(token: str, experiment_id: uuid.UUID, instance_index: int) -> None:
+    try:
+        validate_progress_token(token, experiment_id, instance_index)
+    except ExperimentError as indexed_error:
+        # Rolling-deploy compatibility for pre-fleet single-instance scripts.
+        if instance_index != 0:
+            raise indexed_error
+        validate_progress_token(token, experiment_id)
+
+
+async def _trim_event_type(
+    db,
+    experiment_id: uuid.UUID,
+    event_type: str,
+    keep: int,
+) -> None:
+    """Hard-cap high-volume telemetry events while retaining lifecycle events."""
+    stale_ids = (
+        select(ExperimentEvent.id)
+        .where(
+            ExperimentEvent.experiment_id == experiment_id,
+            ExperimentEvent.event_type == event_type,
+        )
+        .order_by(ExperimentEvent.created_at.desc(), ExperimentEvent.id.desc())
+        .offset(keep)
+    )
+    await db.execute(delete(ExperimentEvent).where(ExperimentEvent.id.in_(stale_ids)))
 
 
 def set_experiment_arq_pool(pool: ArqRedis) -> None:
@@ -42,18 +76,36 @@ def _get_pool() -> ArqRedis:
     return _experiment_pool
 
 
+async def _enqueue_cleanup_job(experiment_id: uuid.UUID, reason: str) -> None:
+    # Do not use a stable job ID: an earlier completed/failed ARQ job with that
+    # ID would make a genuine retry return None without queuing any work.
+    job = await _get_pool().enqueue_job(
+        "cleanup_ghcr_experiment",
+        str(experiment_id),
+        reason,
+        _queue_name="arq:experiments",
+    )
+    if job is None:
+        raise RuntimeError("Experiment cleanup job was not enqueued")
+
+
 class ExperimentCreateRequest(BaseModel):
     target_refs: list[str] = Field(min_length=1, max_length=4)
     resolved_target_refs: list[str] = Field(min_length=1, max_length=4)
+    target_weights: list[int] = Field(default_factory=list, max_length=4)
     rate_per_minute: int = Field(ge=1)
     duration_minutes: int = Field(ge=1)
     concurrency_limit: int = Field(ge=1)
+    instance_count: int = Field(default=1, ge=1)
     confirmation: str
 
 
 class ExperimentPreflightRequest(BaseModel):
     target_refs: list[str] = Field(min_length=1, max_length=4)
+    # Per-instance expectation; fleet transfer is derived with instance_count.
     expected_pulls: int = Field(ge=1)
+    instance_count: int = Field(default=1, ge=1)
+    target_weights: list[int] = Field(default_factory=list, max_length=4)
 
 
 class ExperimentTargetResponse(BaseModel):
@@ -63,7 +115,9 @@ class ExperimentTargetResponse(BaseModel):
     platform: str
     image_size_bytes: int
     layer_count: int
+    weight: int = 1
     expected_pulls: int
+    estimated_transfer_bytes: int = 0
     launched_pulls: int = 0
     successful_pulls: int = 0
     failed_pulls: int = 0
@@ -79,6 +133,22 @@ class ExperimentPreflightResponse(BaseModel):
     max_transfer_bytes: int
 
 
+class ExperimentInstanceResponse(BaseModel):
+    index: int
+    instance_id: str | None = None
+    status: str
+    cleanup_status: str
+    launched_pulls: int = 0
+    successful_pulls: int = 0
+    failed_pulls: int = 0
+    active_pulls: int = 0
+    max_concurrency: int = 0
+    last_progress_at: datetime | None = None
+    error_message: str | None = None
+    run_log: str | None = None
+    targets: list[dict] = Field(default_factory=list)
+
+
 class ExperimentConfigResponse(BaseModel):
     enabled: bool
     target_ref: str
@@ -86,6 +156,7 @@ class ExperimentConfigResponse(BaseModel):
     max_rate_per_minute: int
     max_duration_minutes: int
     max_concurrency: int
+    max_instances: int
     max_images: int
     max_transfer_bytes: int
 
@@ -95,15 +166,16 @@ class TargetProgressRequest(BaseModel):
     launched: int = Field(ge=0)
     successful: int = Field(ge=0)
     failed: int = Field(ge=0)
-    active: int = Field(ge=0, le=1)
+    active: int = Field(ge=0)
 
 
 class ExperimentProgressRequest(BaseModel):
+    instance_index: int = Field(default=0, ge=0)
     launched: int = Field(ge=0)
     successful: int = Field(ge=0)
     failed: int = Field(ge=0)
-    active: int = Field(ge=0, le=4)
-    max_concurrency: int = Field(ge=0, le=4)
+    active: int = Field(ge=0)
+    max_concurrency: int = Field(ge=0)
     elapsed_seconds: float = Field(ge=0)
     targets: list[TargetProgressRequest]
 
@@ -127,6 +199,7 @@ class ExperimentResponse(BaseModel):
     rate_per_minute: int
     duration_minutes: int
     expected_pulls: int
+    instance_count: int
     concurrency_limit: int
     platform: str
     image_size_bytes: int
@@ -142,6 +215,7 @@ class ExperimentResponse(BaseModel):
     immediate_count: int | None
     delayed_count: int | None
     results: dict
+    instances: list[ExperimentInstanceResponse]
     instance_id: str | None
     terraform_state_key: str
     cancellation_requested: bool
@@ -171,6 +245,7 @@ async def get_experiment_config(admin: AdminUser):
         max_rate_per_minute=settings.ghcr_experiment_max_rate_per_minute,
         max_duration_minutes=settings.ghcr_experiment_max_duration_minutes,
         max_concurrency=settings.ghcr_experiment_max_concurrency,
+        max_instances=getattr(settings, "ghcr_experiment_max_instances", 10),
         max_images=settings.ghcr_experiment_max_images,
         max_transfer_bytes=settings.ghcr_experiment_max_transfer_gb * 1_000_000_000,
     )
@@ -186,11 +261,14 @@ async def preflight_experiment(body: ExperimentPreflightRequest, admin: AdminUse
         raise HTTPException(status_code=400, detail="Experiment images must be unique")
     if len(target_refs) > settings.ghcr_experiment_max_images:
         raise HTTPException(status_code=400, detail="Too many experiment images")
+    if body.instance_count > getattr(settings, "ghcr_experiment_max_instances", 10):
+        raise HTTPException(status_code=400, detail="Too many experiment instances")
     try:
+        weights = normalize_weights(len(target_refs), body.target_weights)
         results = await asyncio.gather(*(preflight_image(target) for target in target_refs))
-    except ExperimentError as exc:
+    except (ExperimentError, ExperimentWeightError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    per_target, remainder = divmod(body.expected_pulls, len(results))
+    allocations = allocate_weighted_pulls(body.expected_pulls, weights)
     targets = [
         ExperimentTargetResponse(
             requested_ref=result.requested_ref,
@@ -199,7 +277,11 @@ async def preflight_experiment(body: ExperimentPreflightRequest, admin: AdminUse
             platform=result.platform,
             image_size_bytes=result.image_size_bytes,
             layer_count=result.layer_count,
-            expected_pulls=per_target + (1 if index < remainder else 0),
+            weight=weights[index],
+            expected_pulls=allocations[index] * body.instance_count,
+            estimated_transfer_bytes=(
+                result.image_size_bytes * allocations[index] * body.instance_count
+            ),
         )
         for index, result in enumerate(results)
     ]
@@ -220,7 +302,7 @@ async def list_all_experiments(db: DB, admin: AdminUser):
 
 @router.post("", response_model=ExperimentResponse, status_code=201)
 async def create_new_experiment(body: ExperimentCreateRequest, db: DB, admin: AdminUser):
-    expected_pulls = body.rate_per_minute * body.duration_minutes
+    expected_pulls = body.rate_per_minute * body.duration_minutes * body.instance_count
     if body.confirmation != f"RUN {expected_pulls}":
         raise HTTPException(status_code=400, detail=f'Type "RUN {expected_pulls}" to confirm')
     try:
@@ -232,6 +314,8 @@ async def create_new_experiment(body: ExperimentCreateRequest, db: DB, admin: Ad
             rate_per_minute=body.rate_per_minute,
             duration_minutes=body.duration_minutes,
             concurrency_limit=body.concurrency_limit,
+            instance_count=body.instance_count,
+            target_weights=body.target_weights,
         )
     except ExperimentError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -247,6 +331,11 @@ async def create_new_experiment(body: ExperimentCreateRequest, db: DB, admin: Ad
     except Exception as exc:
         experiment.status = ExperimentStatus.FAILED
         experiment.error_message = f"Could not enqueue experiment: {exc}"[:2000]
+        instances = ensure_instance_records(experiment)
+        for instance in instances:
+            instance["status"] = "failed"
+            instance["error_message"] = experiment.error_message
+        experiment.instances = instances
         await db.commit()
         raise HTTPException(status_code=503, detail=experiment.error_message) from exc
     return ExperimentResponse.model_validate(experiment)
@@ -262,7 +351,12 @@ async def get_experiment_detail(experiment_id: uuid.UUID, db: DB, admin: AdminUs
 
 
 @router.get("/{experiment_id}/events", response_model=list[ExperimentEventResponse])
-async def get_experiment_events(experiment_id: uuid.UUID, db: DB, admin: AdminUser):
+async def get_experiment_events(
+    experiment_id: uuid.UUID,
+    db: DB,
+    admin: AdminUser,
+    limit: int = Query(default=200, ge=1, le=500),
+):
     try:
         await get_experiment(db, experiment_id)
     except ExperimentError as exc:
@@ -270,9 +364,13 @@ async def get_experiment_events(experiment_id: uuid.UUID, db: DB, admin: AdminUs
     result = await db.execute(
         select(ExperimentEvent)
         .where(ExperimentEvent.experiment_id == experiment_id)
-        .order_by(ExperimentEvent.created_at.asc())
+        .order_by(ExperimentEvent.created_at.desc(), ExperimentEvent.id.desc())
+        .limit(limit)
     )
-    return [ExperimentEventResponse.model_validate(item) for item in result.scalars().all()]
+    # Keep the existing chronological rendering contract while bounding the
+    # response to the newest page.
+    events = list(reversed(result.scalars().all()))
+    return [ExperimentEventResponse.model_validate(item) for item in events]
 
 
 async def _refresh_current_counts(experiment_id: uuid.UUID) -> None:
@@ -285,7 +383,13 @@ async def _refresh_current_counts(experiment_id: uuid.UUID) -> None:
             *(read_download_count(item["package_url"]) for item in targets),
             return_exceptions=True,
         )
-        await db.refresh(experiment)
+        locked = await db.execute(
+            select(Experiment)
+            .where(Experiment.id == experiment_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        experiment = locked.scalar_one()
         latest_targets = {item["target_ref"]: dict(item) for item in experiment.targets}
         snapshot = []
         for target, value in zip(targets, values, strict=True):
@@ -303,6 +407,8 @@ async def _refresh_current_counts(experiment_id: uuid.UUID) -> None:
                 payload={"targets": snapshot},
             )
         )
+        await db.flush()
+        await _trim_event_type(db, experiment.id, "counter_snapshot", MAX_COUNTER_EVENTS)
         await db.commit()
 
 
@@ -316,23 +422,31 @@ async def report_experiment_progress(
 ):
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing progress token")
+    token = authorization.removeprefix("Bearer ")
     try:
-        validate_progress_token(authorization.removeprefix("Bearer "), experiment_id)
-        experiment = await get_experiment(db, experiment_id)
+        _validate_progress_callback_token(token, experiment_id, body.instance_index)
     except ExperimentError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    # Serialize callbacks from fleet members by locking the parent row. This
+    # prevents concurrent JSON snapshots from losing another member's update.
+    result = await db.execute(
+        select(Experiment).where(Experiment.id == experiment_id).with_for_update()
+    )
+    experiment = result.scalar_one_or_none()
+    if experiment is None:
+        raise HTTPException(status_code=404, detail="Experiment not found")
     if experiment.status != ExperimentStatus.RUNNING:
         raise HTTPException(status_code=409, detail="Experiment is not running")
-    if body.launched > experiment.expected_pulls:
-        raise HTTPException(status_code=400, detail="Progress exceeds expected pull count")
-    if body.successful + body.failed + body.active > body.launched:
+    if body.instance_index >= experiment.instance_count:
+        raise HTTPException(status_code=400, detail="Unknown fleet instance")
+    expected_per_instance = experiment.rate_per_minute * experiment.duration_minutes
+    if body.launched > expected_per_instance:
+        raise HTTPException(status_code=400, detail="Progress exceeds per-instance pull count")
+    if body.successful + body.failed + body.active != body.launched:
         raise HTTPException(status_code=400, detail="Invalid progress totals")
-    if (
-        body.launched < experiment.launched_pulls
-        or body.successful < experiment.successful_pulls
-        or body.failed < experiment.failed_pulls
-    ):
-        raise HTTPException(status_code=409, detail="Progress must be monotonic")
+    if body.active > experiment.concurrency_limit or body.max_concurrency > experiment.concurrency_limit:
+        raise HTTPException(status_code=400, detail="Progress exceeds the per-instance concurrency limit")
 
     if (
         sum(item.launched for item in body.targets) != body.launched
@@ -345,40 +459,81 @@ async def report_experiment_progress(
     reported_refs = {item.target_ref for item in body.targets}
     if reported_refs != configured_refs or len(body.targets) != len(configured_refs):
         raise HTTPException(status_code=400, detail="Progress targets do not match experiment targets")
-
-    current_targets = {item["target_ref"]: dict(item) for item in experiment.targets}
+    weights = normalize_weights(
+        len(experiment.targets),
+        [int(item.get("weight", 1)) for item in experiment.targets],
+    )
+    quotas = allocate_weighted_pulls(expected_per_instance, weights)
+    quota_by_ref = {
+        target["target_ref"]: quota
+        for target, quota in zip(experiment.targets, quotas, strict=True)
+    }
     for progress in body.targets:
-        target = current_targets[progress.target_ref]
+        if progress.launched > quota_by_ref[progress.target_ref]:
+            raise HTTPException(status_code=400, detail="Target progress exceeds its weighted quota")
+        if progress.successful + progress.failed + progress.active != progress.launched:
+            raise HTTPException(status_code=400, detail="Invalid per-target progress totals")
+
+    instances = ensure_instance_records(experiment)
+    instance = instances[body.instance_index]
+    if (
+        body.launched < int(instance.get("launched_pulls", 0))
+        or body.successful < int(instance.get("successful_pulls", 0))
+        or body.failed < int(instance.get("failed_pulls", 0))
+    ):
+        raise HTTPException(status_code=409, detail="Instance progress must be monotonic")
+    prior_targets = {item["target_ref"]: item for item in instance.get("targets", [])}
+    for progress in body.targets:
+        previous = prior_targets.get(progress.target_ref, {})
         if (
-            progress.launched < target["launched_pulls"]
-            or progress.successful < target["successful_pulls"]
-            or progress.failed < target["failed_pulls"]
+            progress.launched < int(previous.get("launched", 0))
+            or progress.successful < int(previous.get("successful", 0))
+            or progress.failed < int(previous.get("failed", 0))
         ):
             raise HTTPException(status_code=409, detail="Target progress must be monotonic")
-        target["launched_pulls"] = progress.launched
-        target["successful_pulls"] = progress.successful
-        target["failed_pulls"] = progress.failed
-    experiment.targets = list(current_targets.values())
-    experiment.launched_pulls = body.launched
-    experiment.successful_pulls = body.successful
-    experiment.failed_pulls = body.failed
-    experiment.active_pulls = body.active
-    experiment.max_concurrency = max(experiment.max_concurrency or 0, body.max_concurrency)
     now = datetime.now(UTC)
+    previous_event_at = instance.get("last_progress_event_at")
+    parsed_event_at = datetime.fromisoformat(previous_event_at) if previous_event_at else None
+    should_record_progress = (
+        parsed_event_at is None
+        or (now - parsed_event_at).total_seconds() >= PROGRESS_EVENT_INTERVAL_SECONDS
+        or (body.launched == expected_per_instance and body.active == 0)
+    )
+    instance.update(
+        {
+            "status": "running",
+            "launched_pulls": body.launched,
+            "successful_pulls": body.successful,
+            "failed_pulls": body.failed,
+            "active_pulls": body.active,
+            "max_concurrency": max(int(instance.get("max_concurrency", 0)), body.max_concurrency),
+            "last_progress_at": now.isoformat(),
+            "targets": [item.model_dump() for item in body.targets],
+        }
+    )
+    if should_record_progress:
+        instance["last_progress_event_at"] = now.isoformat()
+    aggregate_instance_progress(experiment, instances)
     experiment.last_progress_at = now
     should_refresh_counts = (
         experiment.last_counter_poll_at is None
-        or (now - experiment.last_counter_poll_at).total_seconds() >= 30
+        or (now - experiment.last_counter_poll_at).total_seconds() >= PROGRESS_EVENT_INTERVAL_SECONDS
     )
     if should_refresh_counts:
         experiment.last_counter_poll_at = now
-    db.add(
-        ExperimentEvent(
-            experiment_id=experiment.id,
-            event_type="progress",
-            payload=body.model_dump(),
+    if should_record_progress:
+        db.add(
+            ExperimentEvent(
+                experiment_id=experiment.id,
+                event_type="progress",
+                payload={
+                    **body.model_dump(),
+                    "instance_id": instances[body.instance_index].get("instance_id"),
+                },
+            )
         )
-    )
+        await db.flush()
+        await _trim_event_type(db, experiment.id, "progress", MAX_PROGRESS_EVENTS)
     await db.commit()
     if should_refresh_counts:
         background_tasks.add_task(_refresh_current_counts, experiment.id)
@@ -401,6 +556,10 @@ async def cancel_experiment(experiment_id: uuid.UUID, db: DB, admin: AdminUser):
     if experiment.status == ExperimentStatus.PENDING and experiment.instance_id is None:
         experiment.status = ExperimentStatus.CANCELLED
         experiment.completed_at = datetime.now(UTC)
+        instances = ensure_instance_records(experiment)
+        for instance in instances:
+            instance["status"] = "cancelled"
+        experiment.instances = instances
     db.add(
         ExperimentEvent(
             experiment_id=experiment.id,
@@ -418,7 +577,10 @@ async def cancel_experiment(experiment_id: uuid.UUID, db: DB, admin: AdminUser):
     )
     await db.commit()
 
-    if experiment.instance_id and experiment.status == ExperimentStatus.RUNNING:
+    instances = ensure_instance_records(experiment)
+    instance_ids = [item["instance_id"] for item in instances if item.get("instance_id")]
+    failures = list(instance_ids)
+    if instance_ids:
         settings = get_settings()
         remote = MockSSM() if settings.use_mock_ssm else RealSSM()
         command = (
@@ -426,9 +588,72 @@ async def cancel_experiment(experiment_id: uuid.UUID, db: DB, admin: AdminUser):
             "touch /tmp/flare-ghcr-experiment/CANCELLED; "
             "pkill -x crane || true"
         )
-        result = await remote.run_command(experiment.instance_id, command, timeout_seconds=60)
-        if result.status != "success":
-            raise HTTPException(status_code=502, detail="Cancellation was recorded but the EC2 signal failed")
+        for attempt in range(3):
+            signal_results = await asyncio.gather(
+                *(remote.run_command(instance_id, command, timeout_seconds=20) for instance_id in failures),
+                return_exceptions=True,
+            )
+            failures = [
+                instance_id
+                for instance_id, result in zip(failures, signal_results, strict=True)
+                if isinstance(result, BaseException) or result.status != "success"
+            ]
+            if not failures:
+                break
+            if attempt < 2:
+                await asyncio.sleep(2**attempt)
+
+        if failures:
+            instances = ensure_instance_records(experiment)
+            for instance in instances:
+                if instance.get("instance_id") in failures:
+                    instance["error_message"] = "Cancellation signal failed; forced cleanup queued"
+            experiment.instances = instances
+            db.add(
+                ExperimentEvent(
+                    experiment_id=experiment.id,
+                    event_type="cancellation_signal_failed",
+                    payload={"instance_ids": failures, "attempts": 3},
+                )
+            )
+            await db.commit()
+            enqueue_error: Exception | None = None
+            try:
+                await _enqueue_cleanup_job(experiment.id, "cancel")
+            except Exception as exc:
+                enqueue_error = exc
+            detail = (
+                "Cancellation was recorded, but some EC2 signals failed. "
+                "Forced fleet cleanup was queued; retry cancellation if the fleet remains active."
+            )
+            if enqueue_error is not None:
+                detail += f" Cleanup could not be queued: {enqueue_error}"
+            raise HTTPException(status_code=502, detail=detail)
+
+        instances = ensure_instance_records(experiment)
+        for instance in instances:
+            if instance.get("error_message") == "Cancellation signal failed; forced cleanup queued":
+                instance["error_message"] = None
+        experiment.instances = instances
+        db.add(
+            ExperimentEvent(
+                experiment_id=experiment.id,
+                event_type="cancellation_signalled",
+                payload={"instance_ids": instance_ids},
+            )
+        )
+        await db.commit()
+    elif experiment.status == ExperimentStatus.PROVISIONING:
+        # Terraform may be hung after creating resources but before returning
+        # outputs. A second worker slot can wait for/clear the state lock and
+        # destroy whatever exists in the experiment state.
+        try:
+            await _enqueue_cleanup_job(experiment.id, "cancel")
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Cancellation recorded but forced cleanup could not be queued: {exc}",
+            ) from exc
 
     return ExperimentResponse.model_validate(experiment)
 
@@ -450,9 +675,8 @@ async def retry_experiment_cleanup(experiment_id: uuid.UUID, db: DB, admin: Admi
         )
     )
     await db.commit()
-    await _get_pool().enqueue_job(
-        "cleanup_ghcr_experiment",
-        str(experiment.id),
-        _queue_name="arq:experiments",
-    )
+    try:
+        await _enqueue_cleanup_job(experiment.id, "retry")
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Cleanup could not be queued: {exc}") from exc
     return ExperimentResponse.model_validate(experiment)

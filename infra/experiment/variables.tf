@@ -3,6 +3,17 @@ variable "experiment_id" {
   type        = string
 }
 
+variable "instance_count" {
+  description = "Number of identical disposable EC2 fleet members"
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.instance_count >= 1 && var.instance_count <= 50 && floor(var.instance_count) == var.instance_count
+    error_message = "instance_count must be an integer between 1 and 50"
+  }
+}
+
 variable "instance_type" {
   description = "EC2 instance type used only for the experiment"
   type        = string

@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from server.config import get_settings
+from server.experiment_weights import ExperimentWeightError, allocate_weighted_pulls, normalize_weights
 from server.models.audit_log import AuditLog
 from server.models.experiment import Experiment, ExperimentEvent, ExperimentStatus
 from server.models.user import User
@@ -52,18 +53,31 @@ class ImagePreflight:
     layer_count: int
 
 
-def create_progress_token(experiment_id: uuid.UUID) -> str:
+def create_progress_token(experiment_id: uuid.UUID, instance_index: int | None = None) -> str:
+    """Create a callback token, optionally scoped to one fleet member."""
     serializer = URLSafeTimedSerializer(get_settings().secret_key, salt="ghcr-experiment-progress")
-    return serializer.dumps({"experiment_id": str(experiment_id), "purpose": "progress"})
+    payload: dict[str, str | int] = {"experiment_id": str(experiment_id), "purpose": "progress"}
+    if instance_index is not None:
+        payload["instance_index"] = instance_index
+    return serializer.dumps(payload)
 
 
-def validate_progress_token(token: str, experiment_id: uuid.UUID) -> None:
+def validate_progress_token(
+    token: str,
+    experiment_id: uuid.UUID,
+    instance_index: int | None = None,
+) -> None:
     serializer = URLSafeTimedSerializer(get_settings().secret_key, salt="ghcr-experiment-progress")
+    # Keep callbacks valid for a full run plus provisioning and cleanup headroom.
+    max_age = max(26 * 60 * 60, get_settings().ghcr_experiment_max_duration_minutes * 60 + 2 * 60 * 60)
     try:
-        payload = serializer.loads(token, max_age=60 * 60 * 2)
+        payload = serializer.loads(token, max_age=max_age)
     except (BadSignature, SignatureExpired) as exc:
         raise ExperimentError("Invalid or expired progress token") from exc
-    if payload != {"experiment_id": str(experiment_id), "purpose": "progress"}:
+    expected: dict[str, str | int] = {"experiment_id": str(experiment_id), "purpose": "progress"}
+    if instance_index is not None:
+        expected["instance_index"] = instance_index
+    if payload != expected:
         raise ExperimentError("Invalid progress token")
 
 
@@ -173,6 +187,8 @@ async def create_experiment(
     rate_per_minute: int,
     duration_minutes: int,
     concurrency_limit: int,
+    instance_count: int = 1,
+    target_weights: list[int] | None = None,
 ) -> Experiment:
     settings = get_settings()
     if not settings.ghcr_experiments_enabled:
@@ -189,8 +205,15 @@ async def create_experiment(
         raise ExperimentError(
             f"Concurrency must be between 1 and {settings.ghcr_experiment_max_concurrency}"
         )
+    max_instances = getattr(settings, "ghcr_experiment_max_instances", 10)
+    if instance_count < 1 or instance_count > max_instances:
+        raise ExperimentError(f"Instance count must be between 1 and {max_instances}")
 
     target_refs = [target.strip() for target in target_refs]
+    try:
+        weights = normalize_weights(len(target_refs), target_weights)
+    except ExperimentWeightError as exc:
+        raise ExperimentError(str(exc)) from exc
     if len(expected_resolved_refs) != len(target_refs):
         raise ExperimentError("Every image must be validated before starting")
     if not target_refs or len(target_refs) > settings.ghcr_experiment_max_images:
@@ -203,8 +226,9 @@ async def create_experiment(
     resolved_refs = [item.target_ref for item in preflights]
     if resolved_refs != expected_resolved_refs:
         raise ExperimentError("An image tag changed after preflight; validate the images again")
-    expected_pulls = rate_per_minute * duration_minutes
-    per_target, remainder = divmod(expected_pulls, len(preflights))
+    expected_pulls_per_instance = rate_per_minute * duration_minutes
+    expected_pulls = expected_pulls_per_instance * instance_count
+    per_instance_allocations = allocate_weighted_pulls(expected_pulls_per_instance, weights)
     targets = [
         {
             "requested_ref": item.requested_ref,
@@ -213,7 +237,11 @@ async def create_experiment(
             "platform": item.platform,
             "image_size_bytes": item.image_size_bytes,
             "layer_count": item.layer_count,
-            "expected_pulls": per_target + (1 if index < remainder else 0),
+            "weight": weights[index],
+            "expected_pulls": per_instance_allocations[index] * instance_count,
+            "estimated_transfer_bytes": (
+                item.image_size_bytes * per_instance_allocations[index] * instance_count
+            ),
             "launched_pulls": 0,
             "successful_pulls": 0,
             "failed_pulls": 0,
@@ -246,12 +274,42 @@ async def create_experiment(
         rate_per_minute=rate_per_minute,
         duration_minutes=duration_minutes,
         expected_pulls=expected_pulls,
+        instance_count=instance_count,
         concurrency_limit=concurrency_limit,
         platform=preflights[0].platform,
         image_size_bytes=sum(item.image_size_bytes for item in preflights),
         layer_count=sum(item.layer_count for item in preflights),
         estimated_transfer_bytes=estimated_transfer_bytes,
         instance_type=settings.ghcr_experiment_instance_type,
+        instances=[
+            {
+                "index": index,
+                "instance_id": None,
+                "status": "pending",
+                "cleanup_status": "not_started",
+                "launched_pulls": 0,
+                "successful_pulls": 0,
+                "failed_pulls": 0,
+                "active_pulls": 0,
+                "max_concurrency": 0,
+                "last_progress_at": None,
+                "last_progress_event_at": None,
+                "error_message": None,
+                "run_log": None,
+                "targets": [
+                    {
+                        "target_ref": item.target_ref,
+                        "weight": weights[target_index],
+                        "launched": 0,
+                        "successful": 0,
+                        "failed": 0,
+                        "active": 0,
+                    }
+                    for target_index, item in enumerate(preflights)
+                ],
+            }
+            for index in range(instance_count)
+        ],
         terraform_state_key="pending",
     )
     db.add(experiment)
@@ -263,9 +321,12 @@ async def create_experiment(
             event_type="created",
             payload={
                 "target_refs": target_refs,
+                "target_weights": weights,
                 "rate_per_minute": rate_per_minute,
                 "duration_minutes": duration_minutes,
                 "expected_pulls": expected_pulls,
+                "expected_pulls_per_instance": expected_pulls_per_instance,
+                "instance_count": instance_count,
                 "concurrency_limit": concurrency_limit,
                 "platform": "linux/amd64",
                 "image_count": len(targets),
@@ -281,9 +342,12 @@ async def create_experiment(
             details={
                 "experiment_id": str(experiment.id),
                 "target_refs": target_refs,
+                "target_weights": weights,
                 "rate_per_minute": rate_per_minute,
                 "duration_minutes": duration_minutes,
                 "expected_pulls": expected_pulls,
+                "expected_pulls_per_instance": expected_pulls_per_instance,
+                "instance_count": instance_count,
                 "concurrency_limit": concurrency_limit,
                 "platform": "linux/amd64",
                 "image_count": len(targets),

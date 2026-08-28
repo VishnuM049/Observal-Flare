@@ -87,10 +87,20 @@ export const experiments = {
   list: () => request<Experiment[]>("/api/experiments"),
   get: (id: string) => request<Experiment>(`/api/experiments/${id}`),
   events: (id: string) => request<ExperimentEvent[]>(`/api/experiments/${id}/events`),
-  preflight: (targetRefs: string[], expectedPulls: number) =>
+  preflight: (
+    targetRefs: string[],
+    expectedPulls: number,
+    instanceCount = 1,
+    targetWeights: number[] = [],
+  ) =>
     request<ExperimentPreflight>("/api/experiments/preflight", {
       method: "POST",
-      body: JSON.stringify({ target_refs: targetRefs, expected_pulls: expectedPulls }),
+      body: JSON.stringify({
+        target_refs: targetRefs,
+        expected_pulls: expectedPulls,
+        instance_count: instanceCount,
+        target_weights: targetWeights,
+      }),
     }),
   create: (data: ExperimentCreateRequest) =>
     request<Experiment>("/api/experiments", {

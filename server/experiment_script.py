@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import shlex
 
+from server.experiment_weights import allocate_weighted_pulls, normalize_weights
+
 CRANE_VERSION = "0.21.9"
 CRANE_LINUX_X86_64_SHA256 = "5c16d8ddb971cb1d5e6ed8b1e743da8224414eeba2c2762d8f1a61b2f095699e"
 RESULT_MARKER = "FLARE_EXPERIMENT_RESULT="
@@ -15,8 +17,12 @@ def build_experiment_script(
     concurrency_limit: int,
     progress_url: str,
     progress_token: str,
+    instance_index: int = 0,
+    target_weights: list[int] | None = None,
 ) -> str:
     interval_seconds = 60 / rate_per_minute
+    weights = normalize_weights(len(target_refs), target_weights)
+    target_quotas = allocate_weighted_pulls(expected_pulls, weights)
     return f"""#!/bin/bash
 set -euo pipefail
 WORK=/tmp/flare-ghcr-experiment
@@ -38,6 +44,7 @@ tar -xzf "$WORK/$CRANE_ARCHIVE" -C "$WORK/bin" crane
 chmod +x "$WORK/bin/crane"
 
 TARGETS_JSON={shlex.quote(json.dumps(target_refs, separators=(',', ':')))}
+TARGET_QUOTAS_JSON={shlex.quote(json.dumps(target_quotas, separators=(',', ':')))}
 REQUESTED={expected_pulls}
 INTERVAL_SECONDS={interval_seconds:.9f}
 MAX_CONCURRENCY={concurrency_limit}
@@ -77,6 +84,9 @@ cancel_file = pathlib.Path(cancel_file_text)
 requested = int(requested_text)
 interval = float(interval_text)
 max_concurrency = int(max_concurrency_text)
+instance_index = {instance_index}
+target_quotas = {target_quotas!r}
+target_assigned = [0] * len(target_refs)
 active = {{}}
 results = []
 stop_reason = None
@@ -124,6 +134,7 @@ def report_progress(force=False):
             "active": sum(item["target_ref"] == target_ref for item in active.values()),
         }})
     payload = json.dumps({{
+        "instance_index": instance_index,
         "launched": launched,
         "successful": sum(item["return_code"] == 0 and item["verified"] for item in results),
         "failed": sum(item["return_code"] != 0 or not item["verified"] for item in results),
@@ -170,6 +181,24 @@ def reap():
     report_progress()
 
 
+def next_target_index(step, unavailable):
+    candidates = [
+        index
+        for index, quota in enumerate(target_quotas)
+        if target_assigned[index] < quota and index not in unavailable
+    ]
+    if not candidates:
+        return None
+    # Largest proportional deficit gives a smooth weighted round-robin order,
+    # while the precomputed quotas preserve the exact requested total.
+    chosen = max(
+        candidates,
+        key=lambda index: ((step + 1) * target_quotas[index] - target_assigned[index] * requested, -index),
+    )
+    target_assigned[chosen] += 1
+    return chosen
+
+
 launched = 0
 for trial in range(1, requested + 1):
     target_time = base + (trial - 1) * interval
@@ -188,10 +217,23 @@ for trial in range(1, requested + 1):
     if len(active) >= max_concurrency:
         stop_reason = f"concurrency limit {{max_concurrency}} reached before trial {{trial}}"
         break
-    target_ref = target_refs[(trial - 1) % len(target_refs)]
-    if len(target_refs) > 1 and any(item["target_ref"] == target_ref for item in active.values()):
-        stop_reason = f"target still active at scheduled start for trial {{trial}}"
+    while True:
+        unavailable = {{
+            target_refs.index(item["target_ref"])
+            for item in active.values()
+        }} if len(target_refs) > 1 else set()
+        target_index = next_target_index(launched, unavailable)
+        if target_index is not None:
+            break
+        reap()
+        if cancel_file.exists() and stop_reason is None:
+            stop_reason = "cancelled by administrator"
+        if stop_reason:
+            break
+        time.sleep(0.05)
+    if stop_reason:
         break
+    target_ref = target_refs[target_index]
 
     directory = root / f"trial-{{trial:05d}}"
     config = directory / "docker-config"

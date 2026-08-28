@@ -54,6 +54,7 @@ class Experiment(Base):
     rate_per_minute: Mapped[int] = mapped_column(Integer, nullable=False)
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     expected_pulls: Mapped[int] = mapped_column(Integer, nullable=False)
+    instance_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     concurrency_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     platform: Mapped[str] = mapped_column(String(32), nullable=False, default="linux/amd64")
     image_size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -71,6 +72,12 @@ class Experiment(Base):
     immediate_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     delayed_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     results: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    # Per-instance lifecycle and results. Each entry retains its EC2 ID after
+    # cleanup so completed fleets remain fully inspectable. ``instance_id`` is
+    # kept as the first live instance for backwards-compatible single-host API
+    # consumers.
+    instances: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
 
     # Infrastructure and cleanup tracking.
     instance_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

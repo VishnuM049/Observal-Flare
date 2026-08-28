@@ -1,22 +1,46 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import signal
 import subprocess
 import sys
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastapi import BackgroundTasks, HTTPException
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from server.api.experiments import (
+    ExperimentProgressRequest,
+    TargetProgressRequest,
+    _enqueue_cleanup_job,
+    _trim_event_type,
+    _validate_progress_callback_token,
+    report_experiment_progress,
+)
 from server.compute import ComputeRunner
-from server.experiment_provisioner import MockExperimentSSM, run_experiment
+from server.experiment_provisioner import (
+    MockExperimentSSM,
+    aggregate_instance_progress,
+    ensure_instance_records,
+    run_experiment,
+)
 from server.experiment_script import build_experiment_script
-from server.experiment_terraform import ExperimentInfraResult, ExperimentInfraRunner
-from server.models.experiment import Experiment, ExperimentStatus
+from server.experiment_terraform import (
+    ExperimentInfraResult,
+    ExperimentInfraRunner,
+    RealExperimentTerraform,
+)
+from server.experiment_weights import ExperimentWeightError, allocate_weighted_pulls, normalize_weights
+from server.models.experiment import Experiment, ExperimentEvent, ExperimentStatus
 from server.models.user import User
 from server.services.experiment_service import (
     ExperimentError,
@@ -27,7 +51,7 @@ from server.services.experiment_service import (
     validate_target_ref,
 )
 from server.ssm import CommandResult, SSMRunner
-from server.worker.experiment_tasks import ExperimentWorkerSettings
+from server.worker.experiment_tasks import ExperimentWorkerSettings, task_cleanup_experiment
 from server.worker.tasks import WorkerSettings
 
 TARGET = (
@@ -49,9 +73,14 @@ class TrackingInfra(ExperimentInfraRunner):
         instance_type: str,
         expires_at: str,
         safety_shutdown_minutes: int,
+        instance_count: int = 1,
     ) -> ExperimentInfraResult:
         self.applied = True
-        return ExperimentInfraResult(instance_id="i-experiment-test")
+        instance_ids = [
+            "i-experiment-test" if index == 0 else f"i-experiment-test-{index + 1}"
+            for index in range(instance_count)
+        ]
+        return ExperimentInfraResult(instance_id=instance_ids[0], instance_ids=instance_ids)
 
     async def destroy(self, experiment_id: str) -> None:
         self.destroyed = True
@@ -62,6 +91,23 @@ class TrackingInfra(ExperimentInfraRunner):
 class FailingRemote(SSMRunner):
     async def run_command(self, instance_id: str, script: str, timeout_seconds: int = 600) -> CommandResult:
         return CommandResult(status="failed", output="crane failed before producing a summary")
+
+
+class WrongWeightedDistributionRemote(SSMRunner):
+    async def run_command(self, instance_id: str, script: str, timeout_seconds: int = 600) -> CommandResult:
+        summary = {
+            "requested": 3,
+            "launched": 3,
+            "successful": 3,
+            "failed": 0,
+            "max_concurrency": 1,
+            "stop_reason": None,
+            "targets": [
+                {"target_ref": TARGET, "launched": 1, "successful": 1, "failed": 0},
+                {"target_ref": TARGET_TWO, "launched": 2, "successful": 2, "failed": 0},
+            ],
+        }
+        return CommandResult(status="success", output="FLARE_EXPERIMENT_RESULT=" + json.dumps(summary))
 
 
 class InstantCompute(ComputeRunner):
@@ -133,6 +179,37 @@ def test_progress_token_is_scoped_to_one_experiment() -> None:
     validate_progress_token(token, experiment_id)
     with pytest.raises(ExperimentError, match="Invalid progress token"):
         validate_progress_token(token, uuid.uuid4())
+
+    member_token = create_progress_token(experiment_id, 2)
+    validate_progress_token(member_token, experiment_id, 2)
+    with pytest.raises(ExperimentError, match="Invalid progress token"):
+        validate_progress_token(member_token, experiment_id, 1)
+
+    # A new API accepts callbacks from a pre-fleet script during a rolling deploy.
+    _validate_progress_callback_token(token, experiment_id, 0)
+    with pytest.raises(ExperimentError, match="Invalid progress token"):
+        _validate_progress_callback_token(token, experiment_id, 1)
+
+
+def test_weighted_allocation_preserves_exact_total() -> None:
+    assert allocate_weighted_pulls(1000, [2, 1]) == [667, 333]
+    assert allocate_weighted_pulls(1000, [1, 1]) == [500, 500]
+    assert allocate_weighted_pulls(1, [1, 1]) == [1, 0]
+    assert normalize_weights(2, []) == [1, 1]
+    with pytest.raises(ExperimentWeightError, match="positive integers"):
+        normalize_weights(2, [1, 0])
+    with pytest.raises(ExperimentWeightError, match="exactly one"):
+        normalize_weights(2, [1])
+
+
+async def test_cleanup_enqueue_none_is_a_failure_and_retries_have_fresh_job_ids() -> None:
+    pool = SimpleNamespace(enqueue_job=AsyncMock(return_value=None))
+    with (
+        patch("server.api.experiments._experiment_pool", pool),
+        pytest.raises(RuntimeError, match="not enqueued"),
+    ):
+        await _enqueue_cleanup_job(uuid.uuid4(), "cancel")
+    assert "_job_id" not in pool.enqueue_job.await_args.kwargs
 
 
 def test_target_requires_ghcr_tag_or_digest() -> None:
@@ -232,13 +309,20 @@ async def test_create_experiment_distributes_pulls_across_targets(
             user=admin_user,
             target_refs=[TARGET, TARGET_TWO],
             expected_resolved_refs=[TARGET, TARGET_TWO],
-            rate_per_minute=3,
+            rate_per_minute=4,
             duration_minutes=1,
             concurrency_limit=2,
+            instance_count=2,
+            target_weights=[2, 1],
         )
 
-    assert [target["expected_pulls"] for target in experiment.targets] == [2, 1]
-    assert experiment.estimated_transfer_bytes == 4096
+    assert experiment.instance_count == 2
+    assert experiment.expected_pulls == 8
+    assert [target["weight"] for target in experiment.targets] == [2, 1]
+    assert [target["expected_pulls"] for target in experiment.targets] == [6, 2]
+    assert [target["estimated_transfer_bytes"] for target in experiment.targets] == [6144, 4096]
+    assert experiment.estimated_transfer_bytes == 10240
+    assert len(experiment.instances) == 2
 
 
 def test_script_uses_isolated_outputs_and_no_docker_daemon() -> None:
@@ -249,15 +333,18 @@ def test_script_uses_isolated_outputs_and_no_docker_daemon() -> None:
         concurrency_limit=3,
         progress_url="https://flare.example/api/experiments/id/progress",
         progress_token="signed-token",
+        target_weights=[2, 1],
     )
     assert "REQUESTED=240" in script
+    assert "target_quotas = [160, 80]" in script
+    assert "next_target_index" in script
     assert "INTERVAL_SECONDS=1.250000000" in script
     assert 'env["DOCKER_CONFIG"] = str(config)' in script
     assert 'directory / "image.tar"' in script
     assert "docker pull" not in script
     assert "MAX_CONCURRENCY=3" in script
     assert "CANCELLED" in script
-    assert "target still active at scheduled start" in script
+    assert "target_assigned" in script
     assert TARGET_TWO in script
     assert "https://flare.example/api/experiments/id/progress" in script
     assert "signed-token" in script
@@ -265,12 +352,13 @@ def test_script_uses_isolated_outputs_and_no_docker_daemon() -> None:
 
 def test_generated_script_records_completed_pull_target(tmp_path: Path) -> None:
     script = build_experiment_script(
-        [TARGET],
-        rate_per_minute=60,
-        expected_pulls=1,
-        concurrency_limit=1,
+        [TARGET, TARGET_TWO],
+        rate_per_minute=120,
+        expected_pulls=6,
+        concurrency_limit=2,
         progress_url="http://127.0.0.1:1/progress",
         progress_token="signed-token",
+        target_weights=[2, 1],
     )
     python_source = script.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0]
 
@@ -298,11 +386,11 @@ with tarfile.open(sys.argv[3], "w") as archive:
             "-c",
             python_source,
             str(fake_crane),
-            json.dumps([TARGET]),
+            json.dumps([TARGET, TARGET_TWO]),
             str(trials),
-            "1",
-            "0",
-            "1",
+            "6",
+            "0.5",
+            "2",
             "http://127.0.0.1:1/progress",
             "signed-token",
             str(tmp_path / "CANCELLED"),
@@ -319,19 +407,113 @@ with tarfile.open(sys.argv[3], "w") as archive:
     ]
     assert len(result_lines) == 1
     summary = json.loads(result_lines[0].split("=", 1)[1])
-    assert summary["launched"] == 1
-    assert summary["successful"] == 1
+    assert summary["launched"] == 6
+    assert summary["successful"] == 6
     assert summary["failed"] == 0
     assert summary["targets"] == [
-        {"target_ref": TARGET, "launched": 1, "successful": 1, "failed": 0}
+        {"target_ref": TARGET, "launched": 4, "successful": 4, "failed": 0},
+        {"target_ref": TARGET_TWO, "launched": 2, "successful": 2, "failed": 0},
     ]
+
+
+async def test_terraform_process_is_terminated_and_reaped_when_job_is_cancelled() -> None:
+    finished = asyncio.Event()
+
+    class FakeProcess:
+        pid = 12345
+        returncode = 0
+
+        async def communicate(self):
+            await finished.wait()
+            return b"", b""
+
+    process = FakeProcess()
+    signals: list[int] = []
+
+    def kill_process_group(pid: int, sent_signal: int) -> None:
+        assert pid == process.pid
+        signals.append(sent_signal)
+        finished.set()
+
+    runner = object.__new__(RealExperimentTerraform)
+    with (
+        patch("server.experiment_terraform.asyncio.create_subprocess_exec", new=AsyncMock(return_value=process)),
+        patch("server.experiment_terraform.os.killpg", side_effect=kill_process_group),
+    ):
+        task = asyncio.create_task(runner._run(["apply"], "/tmp", timeout_seconds=60))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    assert signals == [signal.SIGTERM]
 
 
 def test_worker_queues_are_separate() -> None:
     assert ExperimentWorkerSettings.queue_name == "arq:experiments"
     assert not hasattr(WorkerSettings, "queue_name")
-    assert ExperimentWorkerSettings.max_jobs == 1
+    assert ExperimentWorkerSettings.max_jobs == 2
     assert WorkerSettings.max_jobs == 4
+
+
+def test_fleet_concurrency_uses_current_active_total_not_historical_peaks() -> None:
+    experiment = SimpleNamespace(
+        instances=[],
+        targets=[{"target_ref": TARGET}],
+        launched_pulls=0,
+        successful_pulls=0,
+        failed_pulls=0,
+        active_pulls=0,
+        max_concurrency=None,
+    )
+    instances = [
+        {
+            "launched_pulls": 10,
+            "successful_pulls": 8,
+            "failed_pulls": 0,
+            "active_pulls": 2,
+            "max_concurrency": 4,
+            "targets": [{"target_ref": TARGET, "launched": 10, "successful": 8, "failed": 0}],
+        },
+        {
+            "launched_pulls": 10,
+            "successful_pulls": 9,
+            "failed_pulls": 0,
+            "active_pulls": 1,
+            "max_concurrency": 4,
+            "targets": [{"target_ref": TARGET, "launched": 10, "successful": 9, "failed": 0}],
+        },
+    ]
+
+    aggregate_instance_progress(experiment, instances)
+
+    assert experiment.active_pulls == 3
+    assert experiment.max_concurrency == 3
+
+
+def test_legacy_instance_targets_are_normalized() -> None:
+    experiment = SimpleNamespace(
+        instance_count=1,
+        targets=[{"target_ref": TARGET}],
+        instances=[
+            {
+                "index": 0,
+                "targets": [
+                    {
+                        "target_ref": TARGET,
+                        "launched_pulls": 4,
+                        "successful_pulls": 3,
+                        "failed_pulls": 1,
+                    }
+                ],
+            }
+        ],
+    )
+
+    targets = ensure_instance_records(experiment)[0]["targets"]
+    assert targets == [
+        {"target_ref": TARGET, "launched": 4, "successful": 3, "failed": 1, "active": 0}
+    ]
 
 
 async def test_experiment_pipeline_completes_and_always_destroys(db: AsyncSession, admin_user: User) -> None:
@@ -359,6 +541,181 @@ async def test_experiment_pipeline_completes_and_always_destroys(db: AsyncSessio
     assert result.immediate_count == 12
     assert result.delayed_count == 12
     assert result.destroyed_at is not None
+    assert result.instance_count == 1
+    assert result.instances[0]["instance_id"] == "i-experiment-test"
+    assert result.instances[0]["cleanup_status"] == "destroyed"
+
+
+async def test_experiment_pipeline_runs_a_fleet_and_aggregates_results(
+    db: AsyncSession,
+    admin_user: User,
+) -> None:
+    target = make_experiment(admin_user).targets[0]
+    target["expected_pulls"] = 6
+    experiment = make_experiment(
+        admin_user,
+        instance_count=3,
+        expected_pulls=6,
+        estimated_transfer_bytes=6144,
+        targets=[target],
+    )
+    db.add(experiment)
+    await db.commit()
+    infra = TrackingInfra()
+
+    result = await run_experiment(
+        db,
+        experiment,
+        infra=infra,
+        remote=MockExperimentSSM(),
+        compute=InstantCompute(),
+        count_reader=make_counter([10, 16, 16]),
+        sleep=no_sleep,
+    )
+
+    assert result.status == ExperimentStatus.COMPLETED
+    assert result.successful_pulls == 6
+    assert result.expected_pulls == 6
+    assert len(result.instances) == 3
+    assert [item["successful_pulls"] for item in result.instances] == [2, 2, 2]
+    assert all(item["status"] == "completed" for item in result.instances)
+    assert all(item["cleanup_status"] == "destroyed" for item in result.instances)
+    assert result.targets[0]["successful_pulls"] == 6
+    assert result.instance_id is None
+
+
+async def test_progress_callback_cannot_exceed_weighted_target_quota(
+    db: AsyncSession,
+    admin_user: User,
+) -> None:
+    first = dict(make_experiment(admin_user).targets[0])
+    first.update(weight=2, expected_pulls=2)
+    second = dict(first)
+    second.update(
+        requested_ref=TARGET_TWO,
+        target_ref=TARGET_TWO,
+        package_url="https://github.com/orgs/example/packages/container/package/second-test",
+        weight=1,
+        expected_pulls=1,
+    )
+    experiment = make_experiment(
+        admin_user,
+        status=ExperimentStatus.RUNNING,
+        rate_per_minute=3,
+        expected_pulls=3,
+        targets=[first, second],
+    )
+    db.add(experiment)
+    await db.commit()
+    body = ExperimentProgressRequest(
+        instance_index=0,
+        launched=3,
+        successful=3,
+        failed=0,
+        active=0,
+        max_concurrency=1,
+        elapsed_seconds=60,
+        targets=[
+            TargetProgressRequest(target_ref=TARGET, launched=1, successful=1, failed=0, active=0),
+            TargetProgressRequest(target_ref=TARGET_TWO, launched=2, successful=2, failed=0, active=0),
+        ],
+    )
+
+    with pytest.raises(HTTPException, match="weighted quota") as error:
+        await report_experiment_progress(
+            experiment.id,
+            body,
+            db,
+            BackgroundTasks(),
+            authorization=f"Bearer {create_progress_token(experiment.id, 0)}",
+        )
+
+    assert error.value.status_code == 400
+
+    aggregate_short = ExperimentProgressRequest(
+        instance_index=0,
+        launched=3,
+        successful=2,
+        failed=0,
+        active=0,
+        max_concurrency=1,
+        elapsed_seconds=60,
+        targets=[
+            TargetProgressRequest(target_ref=TARGET, launched=2, successful=1, failed=0, active=0),
+            TargetProgressRequest(target_ref=TARGET_TWO, launched=1, successful=1, failed=0, active=0),
+        ],
+    )
+    with pytest.raises(HTTPException, match="Invalid progress totals"):
+        await report_experiment_progress(
+            experiment.id,
+            aggregate_short,
+            db,
+            BackgroundTasks(),
+            authorization=f"Bearer {create_progress_token(experiment.id, 0)}",
+        )
+
+    per_target_mismatch = ExperimentProgressRequest(
+        instance_index=0,
+        launched=3,
+        successful=2,
+        failed=1,
+        active=0,
+        max_concurrency=1,
+        elapsed_seconds=60,
+        targets=[
+            TargetProgressRequest(target_ref=TARGET, launched=2, successful=1, failed=0, active=0),
+            TargetProgressRequest(target_ref=TARGET_TWO, launched=1, successful=1, failed=1, active=0),
+        ],
+    )
+    with pytest.raises(HTTPException, match="Invalid per-target progress totals"):
+        await report_experiment_progress(
+            experiment.id,
+            per_target_mismatch,
+            db,
+            BackgroundTasks(),
+            authorization=f"Bearer {create_progress_token(experiment.id, 0)}",
+        )
+
+
+async def test_final_summary_must_match_each_weighted_quota(
+    db: AsyncSession,
+    admin_user: User,
+) -> None:
+    first = dict(make_experiment(admin_user).targets[0])
+    first.update(weight=2, expected_pulls=2)
+    second = dict(first)
+    second.update(
+        requested_ref=TARGET_TWO,
+        target_ref=TARGET_TWO,
+        package_url="https://github.com/orgs/example/packages/container/package/second-test",
+        weight=1,
+        expected_pulls=1,
+    )
+    experiment = make_experiment(
+        admin_user,
+        rate_per_minute=3,
+        expected_pulls=3,
+        targets=[first, second],
+        image_size_bytes=2048,
+        layer_count=2,
+        estimated_transfer_bytes=3072,
+    )
+    db.add(experiment)
+    await db.commit()
+
+    result = await run_experiment(
+        db,
+        experiment,
+        infra=TrackingInfra(),
+        remote=WrongWeightedDistributionRemote(),
+        compute=InstantCompute(),
+        count_reader=make_counter([10, 20]),
+        sleep=no_sleep,
+    )
+
+    assert result.successful_pulls == 0
+    assert result.status == ExperimentStatus.FAILED
+    assert "weighted quota" in (result.error_message or "")
 
 
 async def test_cancelled_experiment_does_not_launch_and_still_cleans_up(
@@ -407,6 +764,66 @@ async def test_command_failure_still_destroys_infrastructure(db: AsyncSession, a
     assert result.instance_id is None
     assert result.destroyed_at is not None
     assert "result summary" in (result.error_message or "")
+
+
+async def test_progress_event_retention_is_hard_capped(
+    db: AsyncSession,
+    admin_user: User,
+) -> None:
+    experiment = make_experiment(admin_user)
+    db.add(experiment)
+    await db.commit()
+    db.add_all(
+        [
+            ExperimentEvent(
+                experiment_id=experiment.id,
+                event_type="progress",
+                payload={"sequence": sequence},
+            )
+            for sequence in range(8)
+        ]
+    )
+    await db.flush()
+
+    await _trim_event_type(db, experiment.id, "progress", 3)
+    await db.commit()
+
+    count = await db.scalar(
+        select(func.count()).select_from(ExperimentEvent).where(
+            ExperimentEvent.experiment_id == experiment.id,
+            ExperimentEvent.event_type == "progress",
+        )
+    )
+    assert count == 3
+
+
+async def test_safety_cleanup_does_not_overwrite_completed_experiment(
+    db: AsyncSession,
+    admin_user: User,
+) -> None:
+    experiment = make_experiment(
+        admin_user,
+        status=ExperimentStatus.COMPLETED,
+        completed_at=datetime.now(UTC),
+        destroyed_at=datetime.now(UTC),
+    )
+    db.add(experiment)
+    await db.commit()
+    infra = TrackingInfra()
+
+    @asynccontextmanager
+    async def test_session():
+        yield db
+
+    with (
+        patch("server.worker.experiment_tasks._infra", return_value=infra),
+        patch("server.worker.experiment_tasks.async_session", test_session),
+    ):
+        await task_cleanup_experiment({}, str(experiment.id), "safety")
+
+    await db.refresh(experiment)
+    assert experiment.status == ExperimentStatus.COMPLETED
+    assert infra.destroyed is False
 
 
 async def test_cleanup_failure_is_not_reported_as_destroyed(db: AsyncSession, admin_user: User) -> None:

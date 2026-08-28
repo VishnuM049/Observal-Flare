@@ -36,24 +36,40 @@ export default function ExperimentDetailPage() {
   const [cleanupLoading, setCleanupLoading] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const isTerminal = experiment ? TERMINAL.has(experiment.status) : false;
 
-  const reload = useCallback(() => {
-    Promise.all([experimentsApi.get(id), experimentsApi.events(id)])
-      .then(([detail, timeline]) => {
+  const reloadDetail = useCallback(() => {
+    experimentsApi.get(id)
+      .then((detail) => {
         setExperiment(detail);
-        setEvents(timeline);
         setError(null);
       })
       .catch((err) => setError(err.message));
   }, [id]);
 
+  const reloadEvents = useCallback(() => {
+    experimentsApi.events(id)
+      .then(setEvents)
+      .catch((err) => setError(err.message));
+  }, [id]);
+
   useEffect(() => {
-    reload();
-    const interval = setInterval(() => {
-      if (!experiment || !TERMINAL.has(experiment.status)) reload();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [experiment, reload]);
+    reloadDetail();
+    reloadEvents();
+  }, [reloadDetail, reloadEvents]);
+
+  useEffect(() => {
+    if (isTerminal) {
+      reloadEvents();
+      return;
+    }
+    const detailInterval = setInterval(reloadDetail, 5000);
+    const eventInterval = setInterval(reloadEvents, 30000);
+    return () => {
+      clearInterval(detailInterval);
+      clearInterval(eventInterval);
+    };
+  }, [isTerminal, reloadDetail, reloadEvents]);
 
   async function cancelRun() {
     setShowCancelConfirm(false);
@@ -103,8 +119,8 @@ export default function ExperimentDetailPage() {
         </div>
         <div className="flex gap-3">
           {CANCELLABLE.has(experiment.status) && (
-            <button className="btn-primary" onClick={() => setShowCancelConfirm(true)} disabled={cancelLoading || experiment.cancellation_requested}>
-              {cancelLoading || experiment.cancellation_requested ? "Cancellation requested…" : "Cancel Run"}
+            <button className="btn-primary" onClick={() => setShowCancelConfirm(true)} disabled={cancelLoading}>
+              {cancelLoading ? "Sending cancellation…" : experiment.cancellation_requested ? "Retry Cancellation" : "Cancel Run"}
             </button>
           )}
           <Link href="/experiments" className="btn-primary">&larr; All Experiments</Link>
@@ -138,8 +154,9 @@ export default function ExperimentDetailPage() {
           <div className="text-sm font-medium mt-1">{experiment.last_progress_at ? new Date(experiment.last_progress_at).toLocaleTimeString() : "Waiting…"}</div>
         </div>
         <div className="card px-4 py-3">
-          <div className="section-label">Maximum concurrency</div>
+          <div className="section-label">Estimated peak concurrency</div>
           <div className="text-2xl font-bold mt-1">{experiment.max_concurrency ?? "—"}</div>
+          <div className="text-xs" style={{ color: "var(--color-ink-muted)" }}>Latest per-instance samples</div>
         </div>
       </div>
 
@@ -147,7 +164,7 @@ export default function ExperimentDetailPage() {
         <div className="card px-4 py-3">
           <div className="section-label">Successful pulls</div>
           <div className="text-2xl font-bold mt-1">{experiment.successful_pulls.toLocaleString()}</div>
-          <div className="text-xs" style={{ color: "var(--color-ink-muted)" }}>of {experiment.expected_pulls.toLocaleString()}</div>
+          <div className="text-xs" style={{ color: "var(--color-ink-muted)" }}>of {experiment.expected_pulls.toLocaleString()} — authoritative result</div>
         </div>
         <div className="card px-4 py-3">
           <div className="section-label">Counter before</div>
@@ -166,15 +183,16 @@ export default function ExperimentDetailPage() {
       <section className="card p-6">
         <dl className="grid grid-cols-2 gap-x-8 gap-y-5">
           <Value label="Targets">{experiment.targets.length} image{experiment.targets.length === 1 ? "" : "s"}</Value>
-          <Value label="Plan">{experiment.rate_per_minute}/minute for {experiment.duration_minutes} minutes</Value>
-          <Value label="Concurrency limit">{experiment.concurrency_limit}</Value>
+          <Value label="Plan">{experiment.rate_per_minute}/minute for {experiment.duration_minutes} minutes on each instance</Value>
+          <Value label="Fleet size">{experiment.instance_count} instance{experiment.instance_count === 1 ? "" : "s"}</Value>
+          <Value label="Concurrency limit">{experiment.concurrency_limit} per instance</Value>
           <Value label="Images">{experiment.layer_count} total layers, {formatBytes(experiment.image_size_bytes)} combined</Value>
           <Value label="Estimated transfer">{formatBytes(experiment.estimated_transfer_bytes)}</Value>
           <Value label="Platform">{experiment.platform}</Value>
           <Value label="Instance type">{experiment.instance_type}</Value>
-          <Value label="Maximum concurrency">{experiment.max_concurrency ?? "—"}</Value>
-          <Value label="Instance">
-            {experiment.instance_id ? <span className="font-mono text-xs">{experiment.instance_id}</span> : "Destroyed or not yet created"}
+          <Value label="Estimated peak concurrency">{experiment.max_concurrency ?? "—"}</Value>
+          <Value label="Live infrastructure">
+            {experiment.instance_id ? `${experiment.instances.filter((item) => item.instance_id && item.cleanup_status !== "destroyed").length} instance(s)` : "Destroyed or not yet created"}
           </Value>
           <Value label="Terraform state"><span className="font-mono text-xs">{experiment.terraform_state_key}</span></Value>
           <Value label="Created">{new Date(experiment.created_at).toLocaleString()}</Value>
@@ -184,12 +202,79 @@ export default function ExperimentDetailPage() {
 
       <section className="card overflow-hidden">
         <div className="px-5 py-4 border-b" style={{ borderColor: "var(--color-border)" }}>
-          <h2 className="section-label">Per-image progress and live counters</h2>
+          <h2 className="section-label">Fleet members</h2>
+          <p className="text-xs mt-1" style={{ color: "var(--color-ink-muted)" }}>
+            Every member runs the same rate, duration, concurrency, and image set. EC2 IDs are retained after cleanup for auditability.
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b text-left" style={{ borderColor: "var(--color-border)" }}>
+                <th className="px-4 py-3">Member</th>
+                <th className="px-4 py-3">EC2 instance</th>
+                <th className="px-4 py-3">Run status</th>
+                <th className="px-4 py-3">Cleanup</th>
+                <th className="px-4 py-3">Successful / expected</th>
+                <th className="px-4 py-3">Failed</th>
+                <th className="px-4 py-3">Active</th>
+                <th className="px-4 py-3">Max concurrency</th>
+                <th className="px-4 py-3">Last progress</th>
+                <th className="px-4 py-3">Per-image results</th>
+              </tr>
+            </thead>
+            <tbody>
+              {experiment.instances.map((instance) => (
+                <tr key={instance.index} className="border-b" style={{ borderColor: "var(--color-border)" }}>
+                  <td className="px-4 py-3 font-medium">#{instance.index + 1}</td>
+                  <td className="px-4 py-3 font-mono">{instance.instance_id ?? "Not allocated"}</td>
+                  <td className="px-4 py-3">{instance.status.replaceAll("_", " ")}</td>
+                  <td className="px-4 py-3">{instance.cleanup_status.replaceAll("_", " ")}</td>
+                  <td className="px-4 py-3">{instance.successful_pulls.toLocaleString()} / {(experiment.rate_per_minute * experiment.duration_minutes).toLocaleString()}</td>
+                  <td className="px-4 py-3">{instance.failed_pulls.toLocaleString()}</td>
+                  <td className="px-4 py-3">{instance.active_pulls}</td>
+                  <td className="px-4 py-3">{instance.max_concurrency}</td>
+                  <td className="px-4 py-3">{instance.last_progress_at ? new Date(instance.last_progress_at).toLocaleTimeString() : "—"}</td>
+                  <td className="px-4 py-3 space-y-1">
+                    {instance.targets.map((target) => (
+                      <div key={target.target_ref} title={target.target_ref}>
+                        <span className="font-mono">{target.target_ref.split("@")[0]}</span>: {target.successful}/{target.launched}
+                      </div>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {experiment.instances.some((instance) => instance.error_message) && (
+          <div className="p-4 space-y-2" style={{ color: "var(--color-danger)" }}>
+            {experiment.instances.filter((instance) => instance.error_message).map((instance) => (
+              <div key={instance.index} className="text-xs"><strong>Member #{instance.index + 1}:</strong> {instance.error_message}</div>
+            ))}
+          </div>
+        )}
+        {experiment.instances.some((instance) => instance.run_log) && (
+          <div className="p-4 space-y-2">
+            {experiment.instances.filter((instance) => instance.run_log).map((instance) => (
+              <details key={instance.index}>
+                <summary className="text-xs cursor-pointer">Member #{instance.index + 1} final command output</summary>
+                <pre className="text-xs whitespace-pre-wrap mt-2 overflow-auto">{instance.run_log}</pre>
+              </details>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="card overflow-hidden">
+        <div className="px-5 py-4 border-b" style={{ borderColor: "var(--color-border)" }}>
+          <h2 className="section-label">Per-image fleet progress and live counters</h2>
         </div>
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b text-left" style={{ borderColor: "var(--color-border)" }}>
               <th className="px-4 py-3">Image</th>
+              <th className="px-4 py-3">Weight</th>
               <th className="px-4 py-3">Pulls</th>
               <th className="px-4 py-3">Failed</th>
               <th className="px-4 py-3">Baseline</th>
@@ -213,6 +298,7 @@ export default function ExperimentDetailPage() {
                       )}
                     </a>
                   </td>
+                  <td className="px-4 py-3">{target.weight}</td>
                   <td className="px-4 py-3">{target.successful_pulls}/{target.expected_pulls}</td>
                   <td className="px-4 py-3">{target.failed_pulls}</td>
                   <td className="px-4 py-3">{target.baseline_count ?? "—"}</td>
@@ -239,7 +325,7 @@ export default function ExperimentDetailPage() {
       )}
 
       <section className="card p-5">
-        <h2 className="section-label mb-4">Run timeline</h2>
+        <h2 className="section-label mb-4">Run timeline (latest 200 events)</h2>
         <div className="space-y-3">
           {events.map((event) => (
             <div key={event.id} className="grid grid-cols-[10rem_12rem_1fr] gap-3 text-xs border-b pb-3" style={{ borderColor: "var(--color-border)" }}>
@@ -265,7 +351,9 @@ export default function ExperimentDetailPage() {
       <ConfirmDialog
         open={showCancelConfirm}
         title="Cancel this experiment?"
-        message="Flare will stop new pulls, terminate active pull processes, and destroy the disposable infrastructure."
+        message={experiment.cancellation_requested
+          ? "Flare will retry cancellation signals and force fleet cleanup if any instance cannot be reached."
+          : "Flare will stop new pulls, terminate active pull processes, and destroy the disposable infrastructure."}
         confirmLabel="Cancel Run"
         confirmDisabled={cancelLoading}
         onConfirm={cancelRun}
