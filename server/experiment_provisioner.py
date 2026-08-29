@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import shlex
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -26,6 +27,7 @@ from server.ssm import CommandResult, RealSSM, SSMRunner
 logger = logging.getLogger(__name__)
 CountReader = Callable[[str], Awaitable[int]]
 Sleep = Callable[[float], Awaitable[None]]
+MAX_PULL_ATTEMPTS = 4
 
 
 class ExperimentCancelledError(Exception):
@@ -129,6 +131,51 @@ def _validate_member_summary(
         raise RuntimeError("Experiment target failures do not match the aggregate")
     if summary["successful"] + summary["failed"] != summary["launched"]:
         raise RuntimeError("Experiment result summary totals are inconsistent")
+    telemetry_fields = {
+        "schema_version",
+        "logical_pulls",
+        "attempts",
+        "retries",
+        "saturation_seconds",
+        "saturation_events",
+    }
+    present_telemetry_fields = telemetry_fields.intersection(summary)
+    if present_telemetry_fields and present_telemetry_fields != telemetry_fields:
+        raise RuntimeError("Experiment result summary contains incomplete retry telemetry")
+    if present_telemetry_fields:
+        if summary["schema_version"] != 2:
+            raise RuntimeError("Experiment result summary has an unsupported schema version")
+        logical_pulls = summary["logical_pulls"]
+        attempts = summary["attempts"]
+        retries = summary["retries"]
+        saturation_seconds = summary["saturation_seconds"]
+        saturation_events = summary["saturation_events"]
+        if (
+            isinstance(logical_pulls, bool)
+            or not isinstance(logical_pulls, int)
+            or logical_pulls != summary["launched"]
+        ):
+            raise RuntimeError("Experiment result summary contains invalid logical pull totals")
+        if (
+            isinstance(attempts, bool)
+            or not isinstance(attempts, int)
+            or attempts < summary["launched"]
+            or attempts > summary["launched"] * MAX_PULL_ATTEMPTS
+            or isinstance(retries, bool)
+            or not isinstance(retries, int)
+            or retries != attempts - summary["launched"]
+        ):
+            raise RuntimeError("Experiment result summary contains invalid retry totals")
+        if (
+            isinstance(saturation_seconds, bool)
+            or not isinstance(saturation_seconds, (int, float))
+            or not math.isfinite(saturation_seconds)
+            or saturation_seconds < 0
+            or isinstance(saturation_events, bool)
+            or not isinstance(saturation_events, int)
+            or saturation_events < 0
+        ):
+            raise RuntimeError("Experiment result summary contains invalid saturation telemetry")
 
     for target_ref, quota in zip(target_refs, quotas, strict=True):
         if by_ref[target_ref]["launched"] > quota:
@@ -367,6 +414,7 @@ async def run_experiment(
                 progress_url,
                 create_progress_token(experiment.id, index),
                 instance_index=index,
+                instance_count=experiment.instance_count,
                 target_weights=[int(item.get("weight", 1)) for item in experiment.targets],
             )
             return await remote.run_command(instance_id, script, timeout_seconds=command_timeout)

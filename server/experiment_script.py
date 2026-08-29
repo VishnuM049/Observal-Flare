@@ -19,6 +19,7 @@ def build_experiment_script(
     progress_token: str,
     instance_index: int = 0,
     target_weights: list[int] | None = None,
+    instance_count: int = 1,
 ) -> str:
     interval_seconds = 60 / rate_per_minute
     weights = normalize_weights(len(target_refs), target_weights)
@@ -59,6 +60,8 @@ import datetime as dt
 import json
 import os
 import pathlib
+import random
+import re
 import shutil
 import subprocess
 import sys
@@ -85,15 +88,31 @@ requested = int(requested_text)
 interval = float(interval_text)
 max_concurrency = int(max_concurrency_text)
 instance_index = {instance_index}
+instance_count = {instance_count}
 target_quotas = {target_quotas!r}
 target_assigned = [0] * len(target_refs)
 active = {{}}
+pending_retries = []
 results = []
+error_groups = {{}}
 stop_reason = None
 max_seen = 0
 last_reported = -10
+attempts = 0
+last_attempt_at = None
+consecutive_exhausted_failures = 0
+saturation_started_at = None
+saturation_seconds = 0.0
+saturation_events = 0
 base = time.monotonic()
 started = dt.datetime.now(dt.timezone.utc)
+MAX_RETRIES = 3
+MAX_CONSECUTIVE_EXHAUSTED_FAILURES = 3
+RETRY_BASE_SECONDS = 1.0
+RETRY_MAX_SECONDS = 30.0
+fleet_slot = interval / max(1, instance_count)
+fleet_offset = instance_index * fleet_slot
+jitter_rng = random.Random(f"{{instance_count}}:{{instance_index}}:{{requested}}")
 
 
 def stamp():
@@ -113,32 +132,34 @@ def send_progress(payload):
         pass
 
 
+def logical_active():
+    return len(active) + len(pending_retries)
+
+
 def report_progress(force=False):
     global last_reported
     completed = len(results)
     if not force and completed - last_reported < 10:
         return
     target_progress = []
-    for target_ref in target_refs:
+    for index, target_ref in enumerate(target_refs):
         finished = [item for item in results if item["target_ref"] == target_ref]
+        in_flight = sum(item["target_ref"] == target_ref for item in active.values()) + sum(
+            item["target_ref"] == target_ref for item in pending_retries
+        )
         target_progress.append({{
             "target_ref": target_ref,
-            "launched": sum(item["target_ref"] == target_ref for item in results)
-                + sum(item["target_ref"] == target_ref for item in active.values()),
-            "successful": sum(
-                item["return_code"] == 0 and item["verified"] for item in finished
-            ),
-            "failed": sum(
-                item["return_code"] != 0 or not item["verified"] for item in finished
-            ),
-            "active": sum(item["target_ref"] == target_ref for item in active.values()),
+            "launched": target_assigned[index],
+            "successful": sum(item["verified"] for item in finished),
+            "failed": sum(not item["verified"] for item in finished),
+            "active": in_flight,
         }})
     payload = json.dumps({{
         "instance_index": instance_index,
         "launched": launched,
-        "successful": sum(item["return_code"] == 0 and item["verified"] for item in results),
-        "failed": sum(item["return_code"] != 0 or not item["verified"] for item in results),
-        "active": len(active),
+        "successful": sum(item["verified"] for item in results),
+        "failed": sum(not item["verified"] for item in results),
+        "active": logical_active(),
         "max_concurrency": max_seen,
         "elapsed_seconds": round(time.monotonic() - base, 3),
         "targets": target_progress,
@@ -150,35 +171,183 @@ def report_progress(force=False):
         threading.Thread(target=send_progress, args=(payload,), daemon=True).start()
 
 
+def update_saturation():
+    global saturation_started_at, saturation_seconds, saturation_events
+    now = time.monotonic()
+    saturated = len(active) >= max_concurrency
+    if saturated and saturation_started_at is None:
+        saturation_started_at = now
+        saturation_events += 1
+    elif not saturated and saturation_started_at is not None:
+        saturation_seconds += now - saturation_started_at
+        saturation_started_at = None
+
+
+def classify_error(error):
+    text = error.lower()
+    transient_patterns = (
+        "connection reset", "connection refused", "connection closed", "dial tcp", "i/o timeout",
+        "temporary failure", "temporarily unavailable", "timeout", "timed out", "unexpected eof",
+        "tls handshake timeout", "network is unreachable", "server misbehaving",
+    )
+    if "protocol_error" in text or "http/2" in text:
+        return "http2_protocol", True
+    if "too many requests" in text or re.search(r"(?:status(?: code)?|http(?:/\\S+)?)\\D+429\\b", text):
+        return "rate_limited", True
+    if re.search(r"(?:status(?: code)?|http(?:/\\S+)?)\\D+5\\d\\d\\b", text):
+        return "http_server_error", True
+    if any(pattern in text for pattern in transient_patterns):
+        return "transient_network", True
+    if "unauthorized" in text or "denied" in text:
+        return "authorization", False
+    if "manifest" in text:
+        return "manifest", False
+    if "no space left" in text:
+        return "disk_full", False
+    if "missing archive" in text:
+        return "missing_archive", False
+    return "process_error", False
+
+
+def record_error(category, error, exhausted):
+    group = error_groups.setdefault(category, {{"attempts": 0, "exhausted": 0, "sample": error[-300:]}})
+    group["attempts"] += 1
+    if exhausted:
+        group["exhausted"] += 1
+
+
+def seconds_until_attempt_slot():
+    if last_attempt_at is None:
+        return 0.0
+    return max(0.0, last_attempt_at + interval - time.monotonic())
+
+
+def start_attempt(item):
+    global attempts, last_attempt_at, max_seen
+    item["attempt"] += 1
+    attempts += 1
+    item["archive"].unlink(missing_ok=True)
+    log_path = item["directory"] / f"pull-{{item['attempt']}}.log"
+    log_handle = log_path.open("wb")
+    env = os.environ.copy()
+    env["DOCKER_CONFIG"] = str(item["config"])
+    process = subprocess.Popen(
+        [crane, "pull", item["target_ref"], str(item["archive"])],
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        env=env,
+    )
+    item["log_handle"] = log_handle
+    item["log_path"] = log_path
+    active[process] = item
+    last_attempt_at = time.monotonic()
+    max_seen = max(max_seen, len(active))
+    update_saturation()
+
+
 def reap():
-    global stop_reason
+    global stop_reason, consecutive_exhausted_failures
     for process, item in list(active.items()):
         return_code = process.poll()
         if return_code is None:
             continue
         item["log_handle"].close()
-        archive = item["archive"]
+        del active[process]
+        update_saturation()
         verified = False
-        if return_code == 0 and archive.exists():
+        if return_code == 0 and item["archive"].exists():
             try:
-                with tarfile.open(archive) as tar:
+                with tarfile.open(item["archive"]) as tar:
                     verified = bool(tar.getmembers())
             except tarfile.TarError:
                 verified = False
-        error = ""
-        if not verified:
-            log_path = item["directory"] / "pull.log"
-            error = log_path.read_text(errors="replace")[-500:] if log_path.exists() else "missing archive"
-            if stop_reason is None:
-                stop_reason = f"trial {{item['trial']}} failed: {{error}}"
+        if verified:
+            results.append({{
+                "trial": item["trial"],
+                "target_ref": item["target_ref"],
+                "return_code": return_code,
+                "verified": True,
+                "attempts": item["attempt"],
+            }})
+            consecutive_exhausted_failures = 0
+            shutil.rmtree(item["directory"])
+            continue
+
+        error = item["log_path"].read_text(errors="replace")[-500:] if item["log_path"].exists() else "missing archive"
+        category, transient = classify_error(error)
+        can_retry = (
+            transient
+            and item["attempt"] <= MAX_RETRIES
+            and not cancel_file.exists()
+            and stop_reason is None
+        )
+        record_error(category, error, exhausted=not can_retry)
+        if can_retry:
+            backoff_cap = min(RETRY_MAX_SECONDS, RETRY_BASE_SECONDS * (2 ** (item["attempt"] - 1)))
+            item["retry_ready_at"] = time.monotonic() + jitter_rng.uniform(0.0, backoff_cap)
+            pending_retries.append(item)
+            continue
+
         results.append({{
+            "trial": item["trial"],
             "target_ref": item["target_ref"],
             "return_code": return_code,
-            "verified": verified,
+            "verified": False,
+            "attempts": item["attempt"],
+            "error_category": category,
         }})
         shutil.rmtree(item["directory"])
-        del active[process]
+        consecutive_exhausted_failures += 1
+        if consecutive_exhausted_failures >= MAX_CONSECUTIVE_EXHAUSTED_FAILURES and stop_reason is None:
+            stop_reason = (
+                f"{{consecutive_exhausted_failures}} consecutive pulls exhausted retries; "
+                f"last error category: {{category}}"
+            )
     report_progress()
+
+
+def terminalize_pending_retries(category):
+    while pending_retries:
+        item = pending_retries.pop(0)
+        results.append({{
+            "trial": item["trial"],
+            "target_ref": item["target_ref"],
+            "return_code": 1,
+            "verified": False,
+            "attempts": item["attempt"],
+            "error_category": category,
+        }})
+        shutil.rmtree(item["directory"])
+
+
+def launch_ready_retries():
+    if stop_reason is not None or cancel_file.exists() or len(active) >= max_concurrency:
+        return
+    pending_retries.sort(key=lambda item: (item["retry_ready_at"], item["trial"]))
+    if not pending_retries:
+        return
+    ready_at = pending_retries[0]["retry_ready_at"]
+    if last_attempt_at is not None:
+        ready_at = max(ready_at, last_attempt_at + interval)
+    if ready_at > time.monotonic():
+        return
+    start_attempt(pending_retries.pop(0))
+
+
+def service():
+    global stop_reason
+    reap()
+    if cancel_file.exists() and stop_reason is None:
+        stop_reason = "cancelled by administrator"
+        for process in active:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+    if stop_reason is not None:
+        terminalize_pending_retries("cancelled" if cancel_file.exists() else "aborted")
+        return
+    launch_ready_retries()
 
 
 def next_target_index(step):
@@ -189,8 +358,6 @@ def next_target_index(step):
     ]
     if not candidates:
         raise RuntimeError("weighted schedule exhausted before requested pull count")
-    # Largest proportional deficit gives a smooth weighted round-robin order,
-    # while the precomputed quotas preserve the exact requested total.
     chosen = max(
         candidates,
         key=lambda index: ((step + 1) * target_quotas[index] - target_assigned[index] * requested, -index),
@@ -202,11 +369,12 @@ def next_target_index(step):
 launched = 0
 last_launch_at = None
 for trial in range(1, requested + 1):
-    target_time = base + (trial - 1) * interval
+    jitter = jitter_rng.uniform(-0.35, 0.35) * fleet_slot
+    target_time = base + fleet_offset + (trial - 1) * interval + jitter
     if last_launch_at is not None:
-        target_time = max(target_time, last_launch_at + interval)
+        target_time = max(target_time, last_launch_at + interval * 0.8)
     while True:
-        reap()
+        service()
         if cancel_file.exists() and stop_reason is None:
             stop_reason = "cancelled by administrator"
         if stop_reason:
@@ -217,48 +385,50 @@ for trial in range(1, requested + 1):
         time.sleep(min(remaining, 0.05))
     if stop_reason:
         break
-    while len(active) >= max_concurrency:
-        reap()
+    while logical_active() >= max_concurrency:
+        service()
         if cancel_file.exists() and stop_reason is None:
             stop_reason = "cancelled by administrator"
         if stop_reason:
             break
-        if len(active) >= max_concurrency:
+        if logical_active() >= max_concurrency:
             time.sleep(0.05)
     if stop_reason:
         break
-    target_ref = target_refs[next_target_index(launched)]
+    while True:
+        service()
+        if stop_reason:
+            break
+        remaining = seconds_until_attempt_slot()
+        if remaining <= 0:
+            break
+        time.sleep(min(remaining, 0.05))
+    if stop_reason:
+        break
 
+    target_ref = target_refs[next_target_index(launched)]
     directory = root / f"trial-{{trial:05d}}"
     config = directory / "docker-config"
     config.mkdir(parents=True)
-    archive = directory / "image.tar"
-    log_handle = (directory / "pull.log").open("wb")
-    env = os.environ.copy()
-    env["DOCKER_CONFIG"] = str(config)
-    process = subprocess.Popen(
-        [crane, "pull", target_ref, str(archive)],
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        env=env,
-    )
-    active[process] = {{
+    item = {{
         "trial": trial,
         "target_ref": target_ref,
-        "archive": archive,
+        "archive": directory / "image.tar",
         "directory": directory,
-        "log_handle": log_handle,
+        "config": config,
+        "attempt": 0,
     }}
     launched += 1
+    start_attempt(item)
     last_launch_at = time.monotonic()
-    max_seen = max(max_seen, len(active))
 
-while active:
-    reap()
-    if active:
+while active or pending_retries:
+    service()
+    if active or pending_retries:
         time.sleep(0.05)
 
-successful = sum(item["return_code"] == 0 and item["verified"] for item in results)
+update_saturation()
+successful = sum(item["verified"] for item in results)
 failed = len(results) - successful
 report_progress(force=True)
 target_summaries = []
@@ -267,19 +437,31 @@ for target_ref in target_refs:
     target_summaries.append({{
         "target_ref": target_ref,
         "launched": len(target_results),
-        "successful": sum(item["return_code"] == 0 and item["verified"] for item in target_results),
-        "failed": sum(item["return_code"] != 0 or not item["verified"] for item in target_results),
+        "successful": sum(item["verified"] for item in target_results),
+        "failed": sum(not item["verified"] for item in target_results),
     }})
+grouped_errors = [
+    {{"category": category, **details}}
+    for category, details in sorted(error_groups.items())
+]
 summary = {{
+    "schema_version": 2,
     "requested": requested,
+    "logical_pulls": launched,
     "launched": launched,
     "successful": successful,
     "failed": failed,
+    "attempts": attempts,
+    "retries": attempts - launched,
     "max_concurrency": max_seen,
+    "saturation_seconds": round(saturation_seconds, 3),
+    "saturation_events": saturation_events,
     "interval_seconds": interval,
+    "fleet_offset_seconds": round(fleet_offset, 6),
     "started_at": started.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
     "completed_at": stamp(),
     "stop_reason": stop_reason,
+    "errors": grouped_errors,
     "targets": target_summaries,
 }}
 print("{RESULT_MARKER}" + json.dumps(summary, separators=(",", ":")))

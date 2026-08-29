@@ -5,10 +5,12 @@ import json
 import signal
 import subprocess
 import sys
+import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -30,6 +32,7 @@ from server.compute import ComputeRunner
 from server.experiment_provisioner import (
     MockExperimentSSM,
     _parse_result,
+    _validate_member_summary,
     aggregate_instance_progress,
     ensure_instance_records,
     run_experiment,
@@ -360,7 +363,11 @@ def test_script_uses_isolated_outputs_and_no_docker_daemon() -> None:
     assert "target_quotas = [160, 80]" in script
     assert "next_target_index" in script
     assert "INTERVAL_SECONDS=1.250000000" in script
-    assert 'env["DOCKER_CONFIG"] = str(config)' in script
+    assert 'env["DOCKER_CONFIG"] = str(item["config"])' in script
+    assert "MAX_RETRIES = 3" in script
+    assert "MAX_CONSECUTIVE_EXHAUSTED_FAILURES = 3" in script
+    assert "fleet_offset = instance_index * fleet_slot" in script
+    assert "jitter_rng.uniform" in script
     assert 'directory / "image.tar"' in script
     assert "docker pull" not in script
     assert "MAX_CONCURRENCY=3" in script
@@ -431,6 +438,9 @@ with tarfile.open(sys.argv[3], "w") as archive:
     assert summary["launched"] == 6
     assert summary["successful"] == 6
     assert summary["failed"] == 0
+    assert summary["attempts"] == 6
+    assert summary["retries"] == 0
+    assert summary["errors"] == []
     assert summary["targets"] == [
         {"target_ref": TARGET, "launched": 4, "successful": 4, "failed": 0},
         {"target_ref": TARGET_TWO, "launched": 2, "successful": 2, "failed": 0},
@@ -496,12 +506,307 @@ with tarfile.open(sys.argv[3], "w") as archive:
     )
     summary = json.loads(result_line.split("=", 1)[1])
     assert 2 < summary["max_concurrency"] <= 4
+    assert summary["saturation_events"] >= 1
+    assert summary["saturation_seconds"] > 0
     assert summary["launched"] == 8
     assert summary["successful"] == 8
     assert summary["targets"] == [
         {"target_ref": TARGET, "launched": 4, "successful": 4, "failed": 0},
         {"target_ref": TARGET_TWO, "launched": 4, "successful": 4, "failed": 0},
     ]
+
+
+def test_generated_script_retries_transient_errors_without_counting_attempts_as_pulls(
+    tmp_path: Path,
+) -> None:
+    script = build_experiment_script(
+        [TARGET],
+        rate_per_minute=1200,
+        expected_pulls=2,
+        concurrency_limit=1,
+        progress_url="http://127.0.0.1:1/progress",
+        progress_token="signed-token",
+        instance_index=3,
+        instance_count=17,
+    )
+    python_source = script.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0]
+    fake_crane = tmp_path / "retry-crane"
+    fake_crane.write_text(
+        """#!/usr/bin/env python3
+import io
+import pathlib
+import sys
+import tarfile
+
+state = pathlib.Path(__file__).with_suffix(".state")
+attempt = int(state.read_text()) + 1 if state.exists() else 1
+state.write_text(str(attempt))
+if attempt == 1:
+    print("rpc error: stream error: HTTP/2 PROTOCOL_ERROR", file=sys.stderr)
+    raise SystemExit(1)
+payload = b"image"
+with tarfile.open(sys.argv[3], "w") as archive:
+    member = tarfile.TarInfo("manifest.json")
+    member.size = len(payload)
+    archive.addfile(member, io.BytesIO(payload))
+"""
+    )
+    fake_crane.chmod(0o755)
+    trials = tmp_path / "retry-trials"
+    trials.mkdir()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            python_source,
+            str(fake_crane),
+            json.dumps([TARGET]),
+            str(trials),
+            "2",
+            "0.05",
+            "1",
+            "http://127.0.0.1:1/progress",
+            "signed-token",
+            str(tmp_path / "CANCELLED"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result_line = next(
+        line for line in completed.stdout.splitlines() if line.startswith("FLARE_EXPERIMENT_RESULT=")
+    )
+    summary = json.loads(result_line.split("=", 1)[1])
+    assert summary["fleet_offset_seconds"] == pytest.approx(3 * 0.05 / 17, abs=0.000001)
+    assert summary["logical_pulls"] == summary["launched"] == summary["successful"] == 2
+    assert summary["failed"] == 0
+    assert summary["attempts"] == 3
+    assert summary["retries"] == 1
+    assert summary["errors"] == [
+        {
+            "category": "http2_protocol",
+            "attempts": 1,
+            "exhausted": 0,
+            "sample": "rpc error: stream error: HTTP/2 PROTOCOL_ERROR\n",
+        }
+    ]
+
+
+def test_generated_script_aborts_only_after_consecutive_exhausted_failures(tmp_path: Path) -> None:
+    script = build_experiment_script(
+        [TARGET],
+        rate_per_minute=1200,
+        expected_pulls=6,
+        concurrency_limit=1,
+        progress_url="http://127.0.0.1:1/progress",
+        progress_token="signed-token",
+    )
+    python_source = script.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0]
+    fake_crane = tmp_path / "broken-crane"
+    fake_crane.write_text("#!/bin/sh\necho 'manifest invalid' >&2\nexit 1\n")
+    fake_crane.chmod(0o755)
+    trials = tmp_path / "failed-trials"
+    trials.mkdir()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            python_source,
+            str(fake_crane),
+            json.dumps([TARGET]),
+            str(trials),
+            "6",
+            "0.05",
+            "1",
+            "http://127.0.0.1:1/progress",
+            "signed-token",
+            str(tmp_path / "CANCELLED"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    result_line = next(
+        line for line in completed.stdout.splitlines() if line.startswith("FLARE_EXPERIMENT_RESULT=")
+    )
+    summary = json.loads(result_line.split("=", 1)[1])
+    assert summary["launched"] == 3
+    assert summary["failed"] == 3
+    assert summary["attempts"] == 3
+    assert summary["retries"] == 0
+    assert summary["stop_reason"].startswith("3 consecutive pulls exhausted retries")
+    assert summary["errors"][0]["attempts"] == 3
+    assert summary["errors"][0]["exhausted"] == 3
+
+
+def test_generated_script_rate_limits_retry_attempts(tmp_path: Path) -> None:
+    script = build_experiment_script(
+        [TARGET],
+        rate_per_minute=600,
+        expected_pulls=1,
+        concurrency_limit=1,
+        progress_url="http://127.0.0.1:1/progress",
+        progress_token="signed-token",
+    )
+    python_source = script.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0]
+    fake_crane = tmp_path / "paced-retry-crane"
+    fake_crane.write_text(
+        """#!/usr/bin/env python3
+import io
+import pathlib
+import sys
+import tarfile
+import time
+
+state = pathlib.Path(__file__).with_suffix(".state")
+attempt = int(state.read_text()) + 1 if state.exists() else 1
+state.write_text(str(attempt))
+with pathlib.Path(__file__).with_suffix(".times").open("a") as timestamps:
+    timestamps.write(f"{time.monotonic()}\\n")
+if attempt <= 3:
+    print("stream error: HTTP/2 PROTOCOL_ERROR", file=sys.stderr)
+    raise SystemExit(1)
+payload = b"image"
+with tarfile.open(sys.argv[3], "w") as archive:
+    member = tarfile.TarInfo("manifest.json")
+    member.size = len(payload)
+    archive.addfile(member, io.BytesIO(payload))
+"""
+    )
+    fake_crane.chmod(0o755)
+    trials = tmp_path / "paced-retry-trials"
+    trials.mkdir()
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            python_source,
+            str(fake_crane),
+            json.dumps([TARGET]),
+            str(trials),
+            "1",
+            "0.1",
+            "1",
+            "http://127.0.0.1:1/progress",
+            "signed-token",
+            str(tmp_path / "CANCELLED"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    timestamps = [float(value) for value in fake_crane.with_suffix(".times").read_text().splitlines()]
+    assert len(timestamps) == 4
+    assert all(later - earlier >= 0.08 for earlier, later in pairwise(timestamps))
+
+
+def test_generated_script_does_not_restart_queued_retry_after_cancellation(tmp_path: Path) -> None:
+    script = build_experiment_script(
+        [TARGET],
+        rate_per_minute=60,
+        expected_pulls=2,
+        concurrency_limit=1,
+        progress_url="http://127.0.0.1:1/progress",
+        progress_token="signed-token",
+    )
+    python_source = script.split("<<'PY'\n", 1)[1].rsplit("\nPY\n", 1)[0]
+    fake_crane = tmp_path / "cancel-retry-crane"
+    fake_crane.write_text(
+        """#!/bin/sh
+state="$0.state"
+count=0
+[ ! -f "$state" ] || count=$(cat "$state")
+count=$((count + 1))
+echo "$count" > "$state"
+echo 'stream error: HTTP/2 PROTOCOL_ERROR' >&2
+exit 1
+"""
+    )
+    fake_crane.chmod(0o755)
+    trials = tmp_path / "cancel-retry-trials"
+    trials.mkdir()
+    cancel_file = tmp_path / "CANCELLED"
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            python_source,
+            str(fake_crane),
+            json.dumps([TARGET]),
+            str(trials),
+            "2",
+            "1.0",
+            "1",
+            "http://127.0.0.1:1/progress",
+            "signed-token",
+            str(cancel_file),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    state_file = fake_crane.with_suffix(".state")
+    deadline = time.monotonic() + 2
+    while not state_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert state_file.exists(), "first pull attempt did not start"
+    cancel_file.touch()
+    stdout, stderr = process.communicate(timeout=5)
+
+    assert process.returncode == 1, stderr
+    assert state_file.read_text().strip() == "1"
+    result_line = next(line for line in stdout.splitlines() if line.startswith("FLARE_EXPERIMENT_RESULT="))
+    summary = json.loads(result_line.split("=", 1)[1])
+    assert summary["attempts"] == 1
+    assert summary["stop_reason"] == "cancelled by administrator"
+
+
+def test_member_summary_rejects_invalid_retry_telemetry() -> None:
+    base_summary = {
+        "requested": 1,
+        "launched": 1,
+        "successful": 1,
+        "failed": 0,
+        "max_concurrency": 1,
+        "targets": [{"target_ref": TARGET, "launched": 1, "successful": 1, "failed": 0}],
+    }
+
+    with pytest.raises(RuntimeError, match="incomplete retry telemetry"):
+        _validate_member_summary({**base_summary, "schema_version": 2}, [TARGET], [1])
+
+    invalid_attempts = {
+        **base_summary,
+        "schema_version": 2,
+        "logical_pulls": 1,
+        "attempts": 5,
+        "retries": 4,
+        "saturation_seconds": 0.0,
+        "saturation_events": 0,
+    }
+    with pytest.raises(RuntimeError, match="invalid retry totals"):
+        _validate_member_summary(invalid_attempts, [TARGET], [1])
+
+    invalid_saturation = {
+        **invalid_attempts,
+        "attempts": 1,
+        "retries": 0,
+        "saturation_seconds": float("nan"),
+    }
+    with pytest.raises(RuntimeError, match="invalid saturation telemetry"):
+        _validate_member_summary(invalid_saturation, [TARGET], [1])
 
 
 async def test_terraform_process_is_terminated_and_reaped_when_job_is_cancelled() -> None:
