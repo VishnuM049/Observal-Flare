@@ -6,8 +6,9 @@ injectable dependencies so it works with both real AWS and mock implementations.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
-import secrets
 import shlex
 from datetime import datetime, timezone
 
@@ -22,9 +23,9 @@ from server.gcp_compute import GCPCompute
 from server.gcp_remote import GCPRemoteRunner
 from server.gcp_terraform import GCPTerraform
 from server.mock import MockGitHubClient, MockSSM, MockTerraform
+from server.models.audit_log import AuditLog
 from server.models.site import Site, SiteStatus, SleepMode
 from server.services.github_service import GitHubClient, RealGitHubClient
-from server.models.audit_log import AuditLog
 from server.services.site_service import audit_details, transition_status
 from server.ssm import CommandResult, RealSSM, SSMRunner
 from server.terraform import RealTerraform, TerraformRunner
@@ -54,11 +55,9 @@ def _get_defaults(site: Site | None = None) -> tuple[TerraformRunner, SSMRunner,
 
 
 def _generate_env_overrides(site: Site) -> dict[str, str]:
-    secret_key = secrets.token_urlsafe(32)
-
+    """Flare-managed values; SECRET_KEY is retained on the instance, not regenerated."""
     overrides = {
         "DATABASE_URL": "postgresql+asyncpg://postgres:postgres@observal-db:5432/observal",
-        "SECRET_KEY": secret_key,
         "CLICKHOUSE_URL": "clickhouse://default:clickhouse@observal-clickhouse:8123/observal",
         "REDIS_URL": "redis://observal-redis:6379",
         "POSTGRES_USER": "postgres",
@@ -70,59 +69,94 @@ def _generate_env_overrides(site: Site) -> dict[str, str]:
     return overrides
 
 
-def _write_env_script(overrides: dict[str, str]) -> str:
-    """Shell snippet: cp .env.example .env, write overrides to a temp file,
-    then use Python to merge (override existing keys, append new ones).
-    Finally, verify all overrides are present in the resulting .env."""
-    overrides_content = "\n".join(f"{k}={v}" for k, v in overrides.items())
-    return f"""rm -f .env /tmp/flare-overrides.env
-cp .env.example .env
-cat > /tmp/flare-overrides.env << 'OVERRIDESEOF'
-{overrides_content}
-OVERRIDESEOF
-python3 -c "
-import collections, sys
-env = collections.OrderedDict()
-for path in ['.env', '/tmp/flare-overrides.env']:
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            if '=' in line:
-                k, v = line.split('=', 1)
-                env[k] = v
-with open('.env', 'w') as f:
-    for k, v in env.items():
-        f.write(f'{{k}}={{v}}\\n')
+# Runs on the target instance. Never print values: SSM and deploy logs are retained.
+# Merge order: upstream defaults < existing instance settings < Flare-managed values.
+# SECRET_KEY is special: generate once on a new instance, preserve on every update.
+_ENV_MERGE_PY = r'''
+import base64
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import sys
+import tempfile
 
-# Verify all overrides were applied correctly
-overrides = {{}}
-with open('/tmp/flare-overrides.env') as f:
-    for line in f:
-        line = line.strip()
-        if line and '=' in line:
-            k, v = line.split('=', 1)
-            overrides[k] = v
-missing = []
-mismatched = []
-for k, expected in overrides.items():
-    actual = env.get(k)
-    if actual is None:
-        missing.append(k)
-    elif actual != expected:
-        mismatched.append(f'{{k}}: expected [{{expected[:20]}}...] got [{{actual[:20]}}...]')
-if missing or mismatched:
-    print('WARNING: Some env overrides may not have applied correctly. Consider redeploying after fixing.', file=sys.stderr)
-    if missing:
-        print(f'  Missing keys: {{missing}}', file=sys.stderr)
-    if mismatched:
-        for m in mismatched:
-            print(f'  Mismatch: {{m}}', file=sys.stderr)
-else:
-    print(f'ENV OK: {{len(overrides)}} overrides verified')
-"
-rm -f /tmp/flare-overrides.env"""
+key_pattern = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
+
+
+def read_env(path):
+    values = {}
+    managed = set()
+    for line in path.read_text().splitlines():
+        if line.startswith("# FLARE_MANAGED_KEYS="):
+            keys = json.loads(base64.b64decode(line.split("=", 1)[1], validate=True))
+            if not isinstance(keys, list) or not all(isinstance(key, str) for key in keys):
+                raise ValueError("Invalid Flare env metadata")
+            managed = set(keys)
+        elif not line.strip() or line.lstrip().startswith("#"):
+            continue
+        else:
+            match = key_pattern.fullmatch(line)
+            if not match:
+                raise ValueError("Invalid env file format; refusing to replace .env")
+            values[match.group(1)] = match.group(2)
+    return values, managed
+
+
+try:
+    overrides = json.loads(base64.b64decode(sys.argv[1], validate=True))
+    existing_required = sys.argv[2] == "1"
+    current = Path(".env")
+    example = Path(".env.example")
+    if current.is_symlink() or (current.exists() and not current.is_file()):
+        raise ValueError("Existing .env is not a regular file")
+    if existing_required and not current.is_file():
+        raise ValueError("Existing .env missing; refusing to redeploy without its secrets")
+    defaults, _ = read_env(example)
+    previous, old_managed = read_env(current) if current.exists() else ({}, set())
+    if existing_required and not previous.get("SECRET_KEY", "").strip().strip("\"'"):
+        raise ValueError("Existing SECRET_KEY missing; refusing to rotate it")
+    if "SECRET_KEY" in overrides:
+        raise ValueError("SECRET_KEY must not be overridden")
+    for key, value in overrides.items():
+        if (not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
+                or not isinstance(value, str) or any(c in value for c in "\r\n\0")):
+            raise ValueError("Invalid Flare env override; refusing to write .env")
+    secret_key = previous.get("SECRET_KEY") if existing_required else secrets.token_urlsafe(32)
+    # A removed UI override falls back to upstream defaults, not its last written value.
+    # Files predating this marker retain unknown keys conservatively.
+    for key in old_managed - overrides.keys():
+        if key != "SECRET_KEY":
+            previous.pop(key, None)
+    merged = defaults | previous | overrides
+    merged["SECRET_KEY"] = secret_key
+    # Atomic replacement: failures before os.replace leave the original untouched.
+    fd, temp_name = tempfile.mkstemp(prefix=".env.flare-", dir=".")
+    try:
+        with os.fdopen(fd, "w") as output:
+            marker = base64.b64encode(json.dumps(sorted(overrides)).encode()).decode("ascii")
+            output.write(f"# FLARE_MANAGED_KEYS={marker}\n")
+            for key, value in merged.items():
+                output.write(f"{key}={value}\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temp_name, current)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+    print("Flare env merge complete (values redacted)")
+except (OSError, ValueError, TypeError, KeyError):
+    # Do not include exception details: they could include secrets or paths.
+    print("Flare env merge failed; existing .env left unchanged", file=sys.stderr)
+    sys.exit(1)
+'''
+
+
+def _write_env_script(overrides: dict[str, str], *, existing_required: bool = True) -> str:
+    """Return a secret-safe, fail-closed env merge command for the target instance."""
+    payload = base64.b64encode(json.dumps(overrides).encode()).decode("ascii")
+    return f"python3 - {payload} {int(existing_required)} <<'FLARE_ENV_MERGE_PY'\n{_ENV_MERGE_PY}\nFLARE_ENV_MERGE_PY"
 
 
 async def _validate_credentials(overrides: dict[str, str], cloud_provider: str = "aws") -> list[str]:
@@ -224,7 +258,7 @@ echo "$EXISTING
 
 
 def _deploy_script(site: Site, sha: str) -> str:
-    env_script = _write_env_script(_generate_env_overrides(site))
+    env_script = _write_env_script(_generate_env_overrides(site), existing_required=False)
     return f"""#!/bin/bash
 set -euo pipefail
 exec > >(tee /var/log/flare-deploy.log) 2>&1
@@ -269,7 +303,7 @@ else
     git checkout {shlex.quote(sha)}
 fi
 
-# Write .env: start from .env.example defaults, then apply Flare overrides
+# Merge upstream defaults with instance settings and Flare overrides
 {env_script}
 
 # Configure Nginx for this domain
@@ -534,7 +568,7 @@ cd /opt/observal
 git fetch origin {shlex.quote(sha)}
 git reset --hard {shlex.quote(sha)}
 
-# Write .env: start from .env.example defaults, then apply Flare overrides
+# Merge upstream defaults with instance settings and Flare overrides
 {env_script}
 
 # Configure Nginx for this domain
@@ -666,7 +700,7 @@ set -euo pipefail
 exec > >(tee /var/log/flare-deploy.log) 2>&1
 cd /opt/observal
 
-# Write .env: start from .env.example defaults, then apply Flare overrides
+# Merge upstream defaults with instance settings and Flare overrides
 {env_script}
 
 COMPOSE="docker compose --env-file .env -f docker/docker-compose.yml -f docker/docker-compose.production.yml"
